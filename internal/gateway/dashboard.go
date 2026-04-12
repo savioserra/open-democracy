@@ -212,6 +212,12 @@ func (s *Server) handleFormAddParticipant(w http.ResponseWriter, r *http.Request
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	_, caller, err := s.callerForForm(r)
+	if err != nil {
+		s.redirectAfterAction(w, r, "/participants", err)
+		return
+	}
+
 	id := strings.TrimSpace(r.FormValue("id"))
 	display := strings.TrimSpace(r.FormValue("display"))
 	rawClaims := strings.TrimSpace(r.FormValue("claims"))
@@ -237,8 +243,13 @@ func (s *Server) handleFormAddParticipant(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	if err := s.authorizeParticipantClaims(caller, claims); err != nil {
+		s.redirectAfterAction(w, r, "/participants", err)
+		return
+	}
+
 	p := Participant{ID: id, Display: display, Claims: claims}
-	err := s.saveParticipant(p)
+	err = s.saveParticipant(p)
 	s.redirectAfterAction(w, r, "/participants", err)
 }
 
@@ -247,8 +258,23 @@ func (s *Server) handleFormRemoveParticipant(w http.ResponseWriter, r *http.Requ
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	_, caller, err := s.callerForForm(r)
+	if err != nil {
+		s.redirectAfterAction(w, r, "/participants", err)
+		return
+	}
+
 	id := strings.TrimSpace(r.FormValue("id"))
-	err := s.removeParticipant(id)
+	target, tErr := s.registry.Get(id)
+	if tErr != nil {
+		s.redirectAfterAction(w, r, "/participants", tErr)
+		return
+	}
+	if err := s.authorizeParticipantClaims(caller, target.Claims); err != nil {
+		s.redirectAfterAction(w, r, "/participants", err)
+		return
+	}
+	err = s.removeParticipant(id)
 	s.redirectAfterAction(w, r, "/participants", err)
 }
 

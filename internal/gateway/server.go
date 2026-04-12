@@ -108,6 +108,44 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 }
 
+// --- participant authorization -----------------------------------------------
+
+// authorizeParticipantClaims checks that the caller has ADMIN authority
+// covering every scope claim being granted. You can only give authority
+// that you yourself hold — no privilege escalation.
+//
+// Each claim has the form "SEG1:SEG2:...:ROLE" or just "SEG1:SEG2:...".
+// The caller needs ADMIN over the scope portion (everything before the
+// role suffix). For example, granting "OPENDEMOCRACY:CORE:VOTER" requires
+// ADMIN covering "OPENDEMOCRACY:CORE".
+func (s *Server) authorizeParticipantClaims(caller *bill.Invoker, claims []string) error {
+	for _, raw := range claims {
+		scope := scopePortionOfClaim(raw)
+		if !caller.HasAdminFor(scope) {
+			return fmt.Errorf("you need ADMIN authority over %s to grant claim %q", scope, raw)
+		}
+	}
+	return nil
+}
+
+// scopePortionOfClaim strips a trailing role token (ADMIN, PROPOSER, etc.)
+// from a claim string and returns just the scope hierarchy. If the last
+// segment is not a known role, the full string is returned as-is (it's a
+// scope-only claim).
+func scopePortionOfClaim(claim string) string {
+	claim = strings.TrimSpace(strings.ToUpper(claim))
+	parts := strings.Split(claim, ":")
+	if len(parts) == 0 {
+		return claim
+	}
+	last := parts[len(parts)-1]
+	switch last {
+	case "ADMIN", "PROPOSER", "EDITOR", "VOTER", "AUDITOR":
+		return strings.Join(parts[:len(parts)-1], ":")
+	}
+	return claim
+}
+
 // --- participant persistence -------------------------------------------------
 // Participants are stored alongside bills in the same PersistedStore using a
 // "PARTICIPANT|{id}" key prefix. This way they survive restarts without

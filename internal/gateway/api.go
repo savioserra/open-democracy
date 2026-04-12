@@ -529,6 +529,11 @@ type createParticipantRequest struct {
 }
 
 func (s *Server) handleAPICreateParticipant(w http.ResponseWriter, r *http.Request) {
+	_, caller, err := s.callerFromRequest(r)
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, err)
+		return
+	}
 	var req createParticipantRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -543,6 +548,10 @@ func (s *Server) handleAPICreateParticipant(w http.ResponseWriter, r *http.Reque
 		writeErr(w, http.StatusBadRequest, errors.New("at least one scope claim is required"))
 		return
 	}
+	if err := s.authorizeParticipantClaims(caller, req.Claims); err != nil {
+		writeErr(w, http.StatusForbidden, err)
+		return
+	}
 	p := Participant{ID: req.ID, Display: req.Display, Claims: req.Claims}
 	if err := s.saveParticipant(p); err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
@@ -552,7 +561,21 @@ func (s *Server) handleAPICreateParticipant(w http.ResponseWriter, r *http.Reque
 }
 
 func (s *Server) handleAPIDeleteParticipant(w http.ResponseWriter, r *http.Request) {
+	_, caller, err := s.callerFromRequest(r)
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, err)
+		return
+	}
 	id := r.PathValue("id")
+	target, tErr := s.registry.Get(id)
+	if tErr != nil {
+		writeErr(w, http.StatusNotFound, tErr)
+		return
+	}
+	if err := s.authorizeParticipantClaims(caller, target.Claims); err != nil {
+		writeErr(w, http.StatusForbidden, err)
+		return
+	}
 	if err := s.removeParticipant(id); err != nil {
 		writeErr(w, http.StatusNotFound, err)
 		return
