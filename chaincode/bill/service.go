@@ -97,7 +97,10 @@ func (s *Service) CreateBill(caller *Invoker, now int64, billID, ipfsHash, descr
 	return nil
 }
 
-// EditBill adds a new version while the bill is in draft status.
+// EditBill adds a new version while the bill is in draft or collecting
+// status. In draft, version agreement is reset (AgreedVersionIndex = -1).
+// In collecting, signatures are reset — people signed the old content,
+// so the mandate must be rebuilt for the new version.
 func (s *Service) EditBill(caller *Invoker, now int64, billID, ipfsHash, description string) error {
 	if ipfsHash == "" {
 		return errors.New("ipfsHash is required")
@@ -106,14 +109,19 @@ func (s *Service) EditBill(caller *Invoker, now int64, billID, ipfsHash, descrip
 	if err != nil {
 		return err
 	}
-	if b.Status != StatusDraft {
-		return errors.New("bill must be in draft status to edit")
+	if b.Status != StatusDraft && b.Status != StatusCollecting {
+		return errors.New("bill must be in draft or collecting status to edit")
 	}
 	if !caller.HasRole(b, RoleEditor) && caller.ID != b.Owner {
 		return errors.New("not authorized: requires EDITOR role or owner")
 	}
 	b.Versions = append(b.Versions, Version{IPFSHash: ipfsHash, Description: description, Timestamp: now, Editor: caller.ID, Votes: map[string]Vote{}})
 	b.AgreedVersionIndex = -1
+	if b.Status == StatusCollecting {
+		// Reset signatures: the content changed, so prior endorsements
+		// are invalid. Re-sign with only the editor's signature.
+		b.Signatures = map[string]int64{caller.ID: now}
+	}
 	if err := s.putBill(b); err != nil {
 		return err
 	}

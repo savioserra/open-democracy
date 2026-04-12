@@ -534,6 +534,41 @@ func TestCollectingBillsAppearInListBills(t *testing.T) {
 	}
 }
 
+func TestEditCollectingBillResetsSignatures(t *testing.T) {
+	svc, _ := newTestService()
+	creator := NewInvoker("alice", []string{"ES:UNION"})
+	signer := NewInvoker("bob", []string{"ES:UNION"})
+
+	_ = svc.CreateCollectingBill(creator, 1, "CB-E", "QmOld", "original", "ES:UNION:*", "0.5", "YES", "NO", 3)
+	// Bob signs the original content.
+	if err := svc.SignBill(signer, 2, "CB-E", nil); err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	b, _ := svc.GetBill("CB-E")
+	if len(b.Signatures) != 2 {
+		t.Fatalf("expected 2 signatures before edit, got %d", len(b.Signatures))
+	}
+
+	// Owner edits the bill — signatures should reset to only the editor.
+	if err := svc.EditBill(creator, 3, "CB-E", "QmNew", "revised content"); err != nil {
+		t.Fatalf("edit: %v", err)
+	}
+	b, _ = svc.GetBill("CB-E")
+	if len(b.Signatures) != 1 {
+		t.Fatalf("expected signatures reset to 1 (editor), got %d", len(b.Signatures))
+	}
+	if _, ok := b.Signatures["alice"]; !ok {
+		t.Fatal("expected editor alice to be the sole signer after edit")
+	}
+	if len(b.Versions) != 2 {
+		t.Fatalf("expected 2 versions, got %d", len(b.Versions))
+	}
+	// Bob can sign again (his old signature was cleared).
+	if err := svc.SignBill(signer, 4, "CB-E", nil); err != nil {
+		t.Fatalf("re-sign after edit: %v", err)
+	}
+}
+
 func contains(s []string, target string) bool {
 	for _, v := range s {
 		if v == target {

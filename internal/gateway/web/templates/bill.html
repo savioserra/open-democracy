@@ -57,7 +57,7 @@
     </ol>
     {{end}}
 
-    {{if isDraft $bill.Status}}
+    {{if or (isDraft $bill.Status) (isCollecting $bill.Status)}}
     <form method="post" action="/actions/edit-bill" data-turbo-frame="_top" class="mt-4 flex flex-wrap items-end gap-2 border-t border-dashed border-border pt-4">
       <input type="hidden" name="_user" value="{{$.AsUser}}">
       <input type="hidden" name="billId" value="{{$bill.ID}}">
@@ -69,7 +69,7 @@
         Description
         <input name="description" required class="rounded border border-border bg-surface-2 px-2 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500">
       </label>
-      <button type="submit" class="rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-500">Add version</button>
+      <button type="submit" class="rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-500">Add version{{if isCollecting $bill.Status}} (resets signatures){{end}}</button>
     </form>
     {{end}}
   </turbo-frame>
