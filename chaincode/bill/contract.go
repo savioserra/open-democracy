@@ -107,7 +107,10 @@ func (c *BillContract) CastVote(ctx contractapi.TransactionContextInterface, bil
 }
 
 // EndVote finalizes the vote. electorateCSV is a comma-separated list of
-// in-scope participant IDs used for delegation resolution and ABSENCE.
+// in-scope participant IDs at close time (whitespace around each ID is
+// trimmed; empty tokens are ignored). The list drives delegation resolution
+// and ABSENCE counting. Unknown IDs are silently skipped — they contribute
+// neither a vote nor an absence.
 func (c *BillContract) EndVote(ctx contractapi.TransactionContextInterface, billID, electorateCSV string) error {
 	caller, err := GetInvoker(ctx)
 	if err != nil {
