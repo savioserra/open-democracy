@@ -106,8 +106,6 @@ func (c *BillContract) CastVote(ctx contractapi.TransactionContextInterface, bil
 	return c.service(ctx).CastVote(caller, now, billID, choice)
 }
 
-// EndVote finalizes the vote. electorate is the in-scope participant count
-// at close time.
 // EndVote finalizes the vote. electorateCSV is a comma-separated list of
 // in-scope participant IDs used for delegation resolution and ABSENCE.
 func (c *BillContract) EndVote(ctx contractapi.TransactionContextInterface, billID, electorateCSV string) error {

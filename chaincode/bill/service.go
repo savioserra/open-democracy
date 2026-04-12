@@ -324,8 +324,11 @@ func (s *Service) CastVote(caller *Invoker, now int64, billID, choice string) (s
 // did not vote directly but have a delegation chain leading to a voter have
 // their weight added to that voter's choice. Participants with no vote and
 // no delegation are counted as absent.
-func (s *Service) EndVote(caller *Invoker, now int64, billID string, electorateIDs []string) error {
-	_ = caller
+//
+// Authorization: once the VoteEnd timestamp has elapsed, any caller may
+// finalize the result. This is intentional — it ensures no admin can
+// prevent finalization by withholding the call.
+func (s *Service) EndVote(_ *Invoker, now int64, billID string, electorateIDs []string) error {
 	b, err := s.getBill(billID)
 	if err != nil {
 		return err
@@ -822,6 +825,7 @@ func (s *Service) RegisterParticipant(caller *Invoker, now int64, id, displayNam
 	if id == "" {
 		return errors.New("participant id is required")
 	}
+	displayName = strings.TrimSpace(displayName)
 	if len(claims) == 0 {
 		return errors.New("at least one scope claim is required")
 	}

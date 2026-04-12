@@ -3,6 +3,7 @@ package gateway
 import (
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"time"
 
@@ -41,7 +42,9 @@ func Seed(reg *Registry, svc *bill.Service) error {
 		}
 		// Write to ledger so seed participants are on-ledger like
 		// dashboard-added ones (auditable, event-sourced).
-		_ = svc.RegisterParticipant(seedAdmin, now, p.ID, p.Display, p.Claims)
+		if err := svc.RegisterParticipant(seedAdmin, now, p.ID, p.Display, p.Claims); err != nil {
+			log.Printf("seed: register participant %s: %v", p.ID, err)
+		}
 		reg.Add(p)
 	}
 	bills, err := svc.ListBills()
@@ -108,7 +111,6 @@ func seedSampleBills(reg *Registry, svc *bill.Service) error {
 	// CORE scope covers: savio, alice, bob, carol, dave, eve = 6
 	// COMMUNITY scope covers: alice, frank, grace = 3 (alice has both)
 	coreElectorate := 6
-	communityElectorate := 3
 
 	// ── PROP-001: Architecture decision — extract Service layer ──────
 	//
@@ -280,7 +282,6 @@ func seedSampleBills(reg *Registry, svc *bill.Service) error {
 		return fmt.Errorf("seed delegation dave→carol: %w", err)
 	}
 
-	_ = communityElectorate
 	return nil
 }
 

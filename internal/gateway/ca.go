@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -104,6 +105,11 @@ func (p *FabricCAProvider) Register(id, displayName string, claims []string) err
 
 	scopeCSV := strings.Join(claims, ",")
 
+	// Fabric CA attribute format: "key=value:ecert,key2=value2:ecert"
+	// A comma or equals sign in the display name would corrupt the attribute
+	// list. Replace them with safe substitutes before embedding.
+	safeDisplayName := strings.NewReplacer(",", " ", "=", "-").Replace(displayName)
+
 	// Register the identity.
 	args := []string{
 		"register",
@@ -111,7 +117,7 @@ func (p *FabricCAProvider) Register(id, displayName string, claims []string) err
 		"--id.name", id,
 		"--id.secret", secret,
 		"--id.type", "client",
-		"--id.attrs", fmt.Sprintf("scopes=%s:ecert,displayName=%s:ecert", scopeCSV, displayName),
+		"--id.attrs", fmt.Sprintf("scopes=%s:ecert,displayName=%s:ecert", scopeCSV, safeDisplayName),
 		"-u", p.cfg.URL,
 		"-H", p.homeDir,
 	}
@@ -191,14 +197,19 @@ func (p *FabricCAProvider) caName() string {
 }
 
 func (p *FabricCAProvider) enrollURL(user, secret string) string {
-	// Strip scheme for the user:pass@host format.
-	base := strings.TrimPrefix(p.cfg.URL, "https://")
-	base = strings.TrimPrefix(base, "http://")
-	scheme := "https"
-	if strings.HasPrefix(p.cfg.URL, "http://") {
-		scheme = "http"
+	u, err := url.Parse(p.cfg.URL)
+	if err != nil {
+		// Fall back to manual construction if the stored URL is somehow unparseable.
+		base := strings.TrimPrefix(p.cfg.URL, "https://")
+		base = strings.TrimPrefix(base, "http://")
+		scheme := "https"
+		if strings.HasPrefix(p.cfg.URL, "http://") {
+			scheme = "http"
+		}
+		return fmt.Sprintf("%s://%s:%s@%s", scheme, user, secret, base)
 	}
-	return fmt.Sprintf("%s://%s:%s@%s", scheme, user, secret, base)
+	u.User = url.UserPassword(user, secret)
+	return u.String()
 }
 
 func (p *FabricCAProvider) tlsFlags() []string {
