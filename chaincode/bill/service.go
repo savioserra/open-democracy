@@ -568,7 +568,12 @@ func (s *Service) ResolveDelegatedWeight(billScope string, votes map[string]Vote
 		weights[voterID] = 1
 	}
 	absent := 0
+	seen := map[string]bool{}
 	for _, uid := range electorate {
+		if seen[uid] {
+			continue // dedup electorate — prevents double-counting delegations
+		}
+		seen[uid] = true
 		if _, voted := votes[uid]; voted {
 			continue
 		}
