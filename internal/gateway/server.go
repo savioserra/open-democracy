@@ -169,7 +169,7 @@ func parseTemplates() (map[string]*template.Template, error) {
 		"isDraft":    func(s string) bool { return s == bill.StatusDraft },
 		"slice": func(items ...string) []string { return items },
 	}
-	pages := []string{"index.html", "bill.html", "participants.html", "entities.html", "events.html"}
+	pages := []string{"index.html", "bill.html", "petitions.html", "petition.html", "participants.html", "entities.html", "events.html"}
 	out := make(map[string]*template.Template, len(pages))
 	for _, p := range pages {
 		t, err := template.New(p).Funcs(funcs).ParseFS(webFS,

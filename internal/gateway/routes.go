@@ -15,7 +15,12 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /entities", s.handleEntitiesPage)
 	s.mux.HandleFunc("GET /events", s.handleEventsPage)
 
+	s.mux.HandleFunc("GET /petitions", s.handlePetitionsPage)
+	s.mux.HandleFunc("GET /petitions/{id}", s.handlePetitionPage)
+
 	// HTML form actions (the dashboard posts plain forms; we redirect back).
+	s.mux.HandleFunc("POST /actions/create-petition", s.handleFormCreatePetition)
+	s.mux.HandleFunc("POST /actions/sign-petition", s.handleFormSignPetition)
 	s.mux.HandleFunc("POST /actions/create-bill", s.handleFormCreateBill)
 	s.mux.HandleFunc("POST /actions/edit-bill", s.handleFormEditBill)
 	s.mux.HandleFunc("POST /actions/assign-role", s.handleFormAssignRole)
@@ -35,6 +40,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/bills/{id}/submit", s.handleAPISubmit)
 	s.mux.HandleFunc("POST /api/bills/{id}/votes", s.handleAPICastVote)
 	s.mux.HandleFunc("POST /api/bills/{id}/end", s.handleAPIEndVote)
+	s.mux.HandleFunc("GET /api/petitions", s.handleAPIListPetitions)
+	s.mux.HandleFunc("POST /api/petitions", s.handleAPICreatePetition)
+	s.mux.HandleFunc("GET /api/petitions/{id}", s.handleAPIGetPetition)
+	s.mux.HandleFunc("POST /api/petitions/{id}/sign", s.handleAPISignPetition)
 	s.mux.HandleFunc("GET /api/participants", s.handleAPIListParticipants)
 	s.mux.HandleFunc("GET /api/entities", s.handleAPIListEntities)
 	s.mux.HandleFunc("GET /api/events", s.handleAPIEventsHistory)

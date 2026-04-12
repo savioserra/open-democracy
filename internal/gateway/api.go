@@ -310,6 +310,133 @@ func (s *Server) handleAPIEndVote(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// Petitions -----------------------------------------------------------------
+
+type petitionDTO struct {
+	ID            string           `json:"id"`
+	Initiator     string           `json:"initiator"`
+	TargetScope   string           `json:"targetScope"`
+	IPFSHash      string           `json:"ipfsHash"`
+	Description   string           `json:"description"`
+	Quorum        float64          `json:"quorum"`
+	ExecuteMask   string           `json:"executeMask"`
+	RejectMask    string           `json:"rejectMask"`
+	Threshold     int              `json:"threshold"`
+	Signatures    map[string]int64 `json:"signatures"`
+	SignatureCount int             `json:"signatureCount"`
+	Status        string           `json:"status"`
+	CreatedBillID string           `json:"createdBillId,omitempty"`
+	Timestamp     int64            `json:"timestamp"`
+}
+
+func toPetitionDTO(p *bill.Petition) petitionDTO {
+	return petitionDTO{
+		ID:             p.ID,
+		Initiator:      p.Initiator,
+		TargetScope:    p.TargetScope,
+		IPFSHash:       p.IPFSHash,
+		Description:    p.Description,
+		Quorum:         p.Quorum,
+		ExecuteMask:    choiceName(p.Criteria.ExecuteMask),
+		RejectMask:     choiceName(p.Criteria.RejectMask),
+		Threshold:      p.Threshold,
+		Signatures:     p.Signatures,
+		SignatureCount: len(p.Signatures),
+		Status:         p.Status,
+		CreatedBillID:  p.CreatedBillID,
+		Timestamp:      p.Timestamp,
+	}
+}
+
+func (s *Server) handleAPIListPetitions(w http.ResponseWriter, r *http.Request) {
+	petitions, err := s.svc.ListPetitions()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	out := make([]petitionDTO, 0, len(petitions))
+	for _, p := range petitions {
+		out = append(out, toPetitionDTO(p))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) handleAPIGetPetition(w http.ResponseWriter, r *http.Request) {
+	p, err := s.svc.GetPetition(r.PathValue("id"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toPetitionDTO(p))
+}
+
+type createPetitionRequest struct {
+	ID          string `json:"id"`
+	IPFSHash    string `json:"ipfsHash"`
+	Description string `json:"description"`
+	TargetScope string `json:"targetScope"`
+	Quorum      string `json:"quorum"`
+	ExecuteMask string `json:"executeMask"`
+	RejectMask  string `json:"rejectMask"`
+	Threshold   int    `json:"threshold"`
+}
+
+func (s *Server) handleAPICreatePetition(w http.ResponseWriter, r *http.Request) {
+	_, caller, err := s.callerFromRequest(r)
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, err)
+		return
+	}
+	var req createPetitionRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	q, err := parseQuorum(req.Quorum)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.svc.CreatePetition(caller, time.Now().Unix(), req.ID, req.IPFSHash, req.Description, req.TargetScope, q, req.ExecuteMask, req.RejectMask, req.Threshold); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	p, _ := s.svc.GetPetition(req.ID)
+	writeJSON(w, http.StatusCreated, toPetitionDTO(p))
+}
+
+func (s *Server) handleAPISignPetition(w http.ResponseWriter, r *http.Request) {
+	_, caller, err := s.callerFromRequest(r)
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, err)
+		return
+	}
+	eligible := s.eligibleVotersForScope(r.PathValue("id"))
+	if err := s.svc.SignPetition(caller, time.Now().Unix(), r.PathValue("id"), eligible); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// eligibleVotersForScope returns all participant IDs whose scope covers the
+// petition's target scope. This is the electorate for the auto-created bill.
+func (s *Server) eligibleVotersForScope(petitionID string) []string {
+	p, err := s.svc.GetPetition(petitionID)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, part := range s.registry.List() {
+		inv := part.Invoker()
+		if inv.InScope(p.TargetScope) {
+			out = append(out, part.ID)
+		}
+	}
+	return out
+}
+
 // Participants & entities ---------------------------------------------------
 
 func (s *Server) handleAPIListParticipants(w http.ResponseWriter, r *http.Request) {

@@ -236,6 +236,128 @@ func TestListBillsReturnsAll(t *testing.T) {
 	}
 }
 
+// ── Petition tests ──────────────────────────────────────────────────────
+
+func TestPetitionAnyoneCanCreate(t *testing.T) {
+	svc, sink := newTestService()
+	// "nobody" has no roles at all — they should still be able to petition.
+	nobody := NewInvoker("nobody", []string{"ES:UNION"})
+	if err := svc.CreatePetition(nobody, 1, "PET-1", "QmP", "demand X", "ES:UNION:*", "0.5", "YES", "NO", 3); err != nil {
+		t.Fatalf("create petition: %v", err)
+	}
+	p, err := svc.GetPetition("PET-1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if p.Status != PetitionOpen {
+		t.Fatalf("expected open, got %s", p.Status)
+	}
+	if len(p.Signatures) != 1 {
+		t.Fatalf("expected initiator auto-signed, got %d", len(p.Signatures))
+	}
+	if !contains(sink.names(), "PetitionCreated") {
+		t.Fatalf("expected PetitionCreated event")
+	}
+}
+
+func TestPetitionThresholdTriggersBill(t *testing.T) {
+	svc, sink := newTestService()
+	// Community members petition for a change at the CORE scope — the
+	// revolutionary use case. They cannot normally create bills there.
+	community1 := NewInvoker("frank", []string{"ES:COMMUNITY"})
+	community2 := NewInvoker("grace", []string{"ES:COMMUNITY"})
+	community3 := NewInvoker("hank", []string{"ES:COMMUNITY"})
+
+	if err := svc.CreatePetition(community1, 1, "PET-X", "QmX", "community demands feature X at core level", "ES:CORE:*", "0.5", "YES", "NO", 3); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	// All eligible voters who will be enrolled on the resulting bill.
+	allVoters := []string{"alice", "bob", "carol", "frank", "grace", "hank"}
+
+	if err := svc.SignPetition(community2, 2, "PET-X", allVoters); err != nil {
+		t.Fatalf("sign 2: %v", err)
+	}
+	// Not yet triggered (2 of 3).
+	p, _ := svc.GetPetition("PET-X")
+	if p.Status != PetitionOpen {
+		t.Fatalf("should still be open after 2 sigs")
+	}
+
+	// Third signature triggers it.
+	if err := svc.SignPetition(community3, 3, "PET-X", allVoters); err != nil {
+		t.Fatalf("sign 3 (trigger): %v", err)
+	}
+	p, _ = svc.GetPetition("PET-X")
+	if p.Status != PetitionTriggered {
+		t.Fatalf("expected triggered, got %s", p.Status)
+	}
+	if p.CreatedBillID != "PET-PET-X" {
+		t.Fatalf("expected bill PET-PET-X, got %s", p.CreatedBillID)
+	}
+
+	// The auto-created bill should exist, be scoped to CORE, and have
+	// all voters enrolled — including the community members who could
+	// never have been enrolled by a core admin.
+	b, err := svc.GetBill("PET-PET-X")
+	if err != nil {
+		t.Fatalf("get bill: %v", err)
+	}
+	if b.Scope != "ES:CORE:*" {
+		t.Fatalf("expected ES:CORE:*, got %s", b.Scope)
+	}
+	if b.SourcePetitionID != "PET-X" {
+		t.Fatalf("expected source petition PET-X, got %s", b.SourcePetitionID)
+	}
+	for _, uid := range allVoters {
+		if !b.Roles[uid].Has(RoleVoter) {
+			t.Fatalf("expected %s to have VOTER role", uid)
+		}
+	}
+	if !contains(sink.names(), "PetitionTriggered") {
+		t.Fatalf("expected PetitionTriggered event")
+	}
+}
+
+func TestPetitionRejectsDuplicateSignature(t *testing.T) {
+	svc, _ := newTestService()
+	u := NewInvoker("u1", []string{"ES"})
+	_ = svc.CreatePetition(u, 1, "PET-D", "Qm", "dup", "ES:*", "0.5", "YES", "NO", 5)
+	if err := svc.SignPetition(u, 2, "PET-D", nil); err == nil {
+		t.Fatal("expected duplicate signature error")
+	}
+}
+
+func TestPetitionCannotSignAfterTriggered(t *testing.T) {
+	svc, _ := newTestService()
+	u1 := NewInvoker("u1", []string{"ES"})
+	_ = svc.CreatePetition(u1, 1, "PET-T", "Qm", "t", "ES:*", "0.5", "YES", "NO", 1)
+	// threshold=1 means the creator's auto-signature already triggered it.
+	p, _ := svc.GetPetition("PET-T")
+	if p.Status != PetitionTriggered {
+		t.Fatalf("expected triggered, got %s", p.Status)
+	}
+	u2 := NewInvoker("u2", []string{"ES"})
+	if err := svc.SignPetition(u2, 2, "PET-T", nil); err == nil {
+		t.Fatal("expected error signing a triggered petition")
+	}
+}
+
+func TestListPetitions(t *testing.T) {
+	svc, _ := newTestService()
+	u := NewInvoker("u1", []string{"ES:PROPOSER"})
+	for _, id := range []string{"P1", "P2", "P3"} {
+		_ = svc.CreatePetition(u, 1, id, "Qm", "d", "ES:*", "0.5", "YES", "NO", 10)
+	}
+	petitions, err := svc.ListPetitions()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(petitions) != 3 {
+		t.Fatalf("expected 3, got %d", len(petitions))
+	}
+}
+
 func contains(s []string, target string) bool {
 	for _, v := range s {
 		if v == target {

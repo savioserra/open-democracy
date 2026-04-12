@@ -128,4 +128,35 @@ type Bill struct {
     VoteStart          int64           `json:"voteStart"`
     VoteEnd            int64           `json:"voteEnd"`
     AgreedVersionIndex int             `json:"agreedVersionIndex"`
+    // SourcePetitionID links the bill back to the petition that created it.
+    // Empty for bills created directly through CreateBill.
+    SourcePetitionID string `json:"sourcePetitionId,omitempty"`
+}
+
+// Petition status
+const (
+    PetitionOpen      = "open"
+    PetitionTriggered = "triggered"
+)
+
+// Petition is a popular initiative. Any participant can start one regardless
+// of role. When enough people sign it, a bill is automatically created at the
+// target scope with every in-scope participant enrolled as VOTER. No admin
+// can block the creation or cherry-pick the electorate — the signatures are
+// the mandate. This is the mechanism by which the base can force the
+// leadership to act, consistent with the project's grounding in Marx's
+// material-conditions analysis and Lenin's democratic centralism.
+type Petition struct {
+    ID            string           `json:"id"`
+    Initiator     string           `json:"initiator"`
+    TargetScope   string           `json:"targetScope"`
+    IPFSHash      string           `json:"ipfsHash"`
+    Description   string           `json:"description"`
+    Quorum        float64          `json:"quorum"`
+    Criteria      Criteria         `json:"criteria"`
+    Threshold     int              `json:"threshold"`
+    Signatures    map[string]int64 `json:"signatures"`
+    Status        string           `json:"status"`
+    CreatedBillID string           `json:"createdBillId,omitempty"`
+    Timestamp     int64            `json:"timestamp"`
 }

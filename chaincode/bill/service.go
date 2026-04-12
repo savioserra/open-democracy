@@ -405,7 +405,217 @@ func (s *Service) ListBills() ([]*Bill, error) {
 	return out, nil
 }
 
+// ── Petitions ──────────────────────────────────────────────────────────────
+//
+// The petition mechanism lets the base force a vote that the leadership
+// cannot block. No PROPOSER or ADMIN role is required to create or sign a
+// petition. When enough signatures accumulate, a bill is created
+// automatically at the target scope with every eligible participant
+// enrolled as VOTER. The admin cannot cherry-pick the electorate.
+
+// CreatePetition starts a new petition. Anyone can call this — no role
+// check. The caller specifies how many signatures (threshold) are needed
+// to trigger the automatic bill creation, and at which scope the resulting
+// bill should live.
+func (s *Service) CreatePetition(caller *Invoker, now int64, petitionID, ipfsHash, description, targetScope, quorum, executeMask, rejectMask string, threshold int) error {
+	if caller == nil {
+		return errors.New("caller is required")
+	}
+	if petitionID == "" {
+		return errors.New("petitionID is required")
+	}
+	if ipfsHash == "" {
+		return errors.New("ipfsHash is required")
+	}
+	if threshold < 1 {
+		return errors.New("threshold must be at least 1")
+	}
+	q, err := strconv.ParseFloat(quorum, 64)
+	if err != nil || q < 0 || q > 1 {
+		return fmt.Errorf("invalid quorum: %s", quorum)
+	}
+	scope := normalizeScopePattern(targetScope)
+	if scope == "" {
+		return errors.New("targetScope is required")
+	}
+	key := petitionKey(petitionID)
+	exists, err := s.store.Exists(key)
+	if err != nil {
+		return err
+	}
+	if exists {
+		return fmt.Errorf("petition %s already exists", petitionID)
+	}
+	execMask, rejMask, err := parseCriteriaMasks(executeMask, rejectMask)
+	if err != nil {
+		return err
+	}
+	p := &Petition{
+		ID:          petitionID,
+		Initiator:   caller.ID,
+		TargetScope: scope,
+		IPFSHash:    ipfsHash,
+		Description: description,
+		Quorum:      q,
+		Criteria:    Criteria{ExecuteMask: execMask, RejectMask: rejMask},
+		Threshold:   threshold,
+		Signatures:  map[string]int64{caller.ID: now},
+		Status:      PetitionOpen,
+		Timestamp:   now,
+	}
+	payload, _ := json.Marshal(map[string]any{"petitionId": petitionID, "initiator": caller.ID, "targetScope": scope, "threshold": threshold})
+	_ = s.events.Emit("PetitionCreated", payload)
+
+	// If threshold == 1, the initiator's own signature triggers immediately.
+	if len(p.Signatures) >= p.Threshold {
+		billID := "PET-" + petitionID
+		if err := s.triggerPetitionBill(p, billID, now, nil); err != nil {
+			return fmt.Errorf("trigger petition bill: %w", err)
+		}
+		p.Status = PetitionTriggered
+		p.CreatedBillID = billID
+		triggerPayload, _ := json.Marshal(map[string]any{"petitionId": petitionID, "billId": billID, "signatures": len(p.Signatures)})
+		_ = s.events.Emit("PetitionTriggered", triggerPayload)
+	}
+	return s.putPetition(p)
+}
+
+// SignPetition adds a signature. Anyone can sign — no role check, no scope
+// check. When the threshold is reached, a bill is created automatically.
+//
+// eligibleVoters is the list of user IDs who should be enrolled as VOTER on
+// the resulting bill. In the gateway this comes from the participant
+// registry (everyone whose scope covers the target); in a Fabric deployment
+// it would come from the MSP or a state-based membership list. The Service
+// itself does not maintain a participant directory, so the caller must
+// provide this list.
+func (s *Service) SignPetition(caller *Invoker, now int64, petitionID string, eligibleVoters []string) error {
+	if caller == nil {
+		return errors.New("caller is required")
+	}
+	p, err := s.getPetition(petitionID)
+	if err != nil {
+		return err
+	}
+	if p.Status != PetitionOpen {
+		return fmt.Errorf("petition %s is already %s", petitionID, p.Status)
+	}
+	if _, already := p.Signatures[caller.ID]; already {
+		return errors.New("already signed")
+	}
+	p.Signatures[caller.ID] = now
+
+	payload, _ := json.Marshal(map[string]any{"petitionId": petitionID, "signer": caller.ID, "count": len(p.Signatures), "threshold": p.Threshold})
+	_ = s.events.Emit("PetitionSigned", payload)
+
+	if len(p.Signatures) >= p.Threshold {
+		billID := "PET-" + petitionID
+		if err := s.triggerPetitionBill(p, billID, now, eligibleVoters); err != nil {
+			return fmt.Errorf("trigger petition bill: %w", err)
+		}
+		p.Status = PetitionTriggered
+		p.CreatedBillID = billID
+		triggerPayload, _ := json.Marshal(map[string]any{"petitionId": petitionID, "billId": billID, "signatures": len(p.Signatures), "voters": len(eligibleVoters)})
+		_ = s.events.Emit("PetitionTriggered", triggerPayload)
+	}
+	return s.putPetition(p)
+}
+
+// triggerPetitionBill creates a bill from a triggered petition, bypassing
+// the normal PROPOSER/ADMIN authorization. The petition's signatures ARE
+// the authorization. Every eligible voter is enrolled automatically.
+func (s *Service) triggerPetitionBill(p *Petition, billID string, now int64, eligibleVoters []string) error {
+	v := Version{
+		IPFSHash:    p.IPFSHash,
+		Description: p.Description,
+		Timestamp:   now,
+		Editor:      p.Initiator,
+		Votes:       map[string]Vote{},
+	}
+	roles := map[string]Role{p.Initiator: RoleProposer | RoleEditor}
+	for _, uid := range eligibleVoters {
+		roles[uid] = roles[uid].With(RoleVoter)
+	}
+	b := &Bill{
+		ID:                 billID,
+		Owner:              p.Initiator,
+		Status:             StatusDraft,
+		Quorum:             p.Quorum,
+		Criteria:           p.Criteria,
+		Scope:              p.TargetScope,
+		Versions:           []Version{v},
+		Roles:              roles,
+		Votes:              map[string]Vote{},
+		AgreedVersionIndex: -1,
+		SourcePetitionID:   p.ID,
+	}
+	if err := s.putBill(b); err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(map[string]string{"billId": billID})
+	_ = s.events.Emit("BillCreated", payload)
+	return nil
+}
+
+// GetPetition returns a petition by ID.
+func (s *Service) GetPetition(petitionID string) (*Petition, error) {
+	return s.getPetition(petitionID)
+}
+
+// ListPetitions scans the store for all petitions.
+func (s *Service) ListPetitions() ([]*Petition, error) {
+	pairs, err := s.store.ScanByPrefix("PETITION|")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*Petition, 0, len(pairs))
+	for _, kv := range pairs {
+		var p Petition
+		if err := json.Unmarshal(kv.Value, &p); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal petition at %s: %w", kv.Key, err)
+		}
+		if p.Signatures == nil {
+			p.Signatures = map[string]int64{}
+		}
+		out = append(out, &p)
+	}
+	return out, nil
+}
+
 // internal helpers ----------------------------------------------------------
+
+func petitionKey(id string) string { return "PETITION|" + id }
+
+func (s *Service) getPetition(id string) (*Petition, error) {
+	if id == "" {
+		return nil, errors.New("petitionID is required")
+	}
+	data, err := s.store.Get(petitionKey(id))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read petition: %w", err)
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("petition %s does not exist", id)
+	}
+	var p Petition
+	if err := json.Unmarshal(data, &p); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal petition: %w", err)
+	}
+	if p.Signatures == nil {
+		p.Signatures = map[string]int64{}
+	}
+	return &p, nil
+}
+
+func (s *Service) putPetition(p *Petition) error {
+	data, err := json.Marshal(p)
+	if err != nil {
+		return fmt.Errorf("failed to marshal petition: %w", err)
+	}
+	return s.store.Put(petitionKey(p.ID), data)
+}
+
+// internal bill helpers ------------------------------------------------------
 
 func (s *Service) getBill(billID string) (*Bill, error) {
 	if billID == "" {
