@@ -1,6 +1,8 @@
 /bin/
 /data/
 /node_modules/
+/gateway
+/odctl
 *.test
 *.out
 *.log
