@@ -9,23 +9,26 @@ import (
 	"open-democracy/chaincode/bill"
 )
 
-// Seed populates the registry with a small federation of demo participants
-// and, if the ledger is empty, creates a sample bill so the dashboard has
-// something to render on first boot.
+// Seed populates the registry with participants representing the
+// open-democracy project's own contributor hierarchy and, if the ledger is
+// empty, creates sample proposals that demonstrate how the repository itself
+// can be governed through its own decision-making system — architecture
+// changes, feature additions, and release approvals all go through the same
+// bill → version → quorum → vote → execute flow that the chaincode models.
 //
-// The participants form a two-org hierarchy under "ES" (a placeholder root
-// for "España" / Educational Society / whatever the deployer wants):
+// Hierarchy (scope tree):
 //
-//	ES                                 → root
-//	└─ TEACHER_UNION                   → org
-//	   ├─ DIVISION_1                   → division
-//	   │  ├─ proposer (Ada)
-//	   │  ├─ editor   (Bea)
-//	   │  ├─ voter    (Carla, Diego, Elena)
-//	   │  └─ admin    (Felipe, scope DIVISION_1)
-//	   └─ DIVISION_2
-//	      └─ admin    (Gala, scope DIVISION_2)
-//	└─ root admin     (Helena, scope ES)
+//	OPENDEMOCRACY                                    → project root
+//	├─ CORE                                          → core maintainers team
+//	│  ├─ admin      (savio)                         → project lead, full admin
+//	│  ├─ proposer   (alice)                         → senior maintainer, can propose
+//	│  ├─ editor     (bob)                           → technical writer / reviewer
+//	│  └─ voters     (alice, bob, carol, dave, eve)  → all core contributors vote
+//	├─ COMMUNITY                                     → community contributors
+//	│  ├─ admin      (alice, scope COMMUNITY)        → community team lead
+//	│  ├─ proposer   (frank)                         → community contributor
+//	│  └─ voters     (frank, grace)                  → community members vote
+//	└─ root admin    (savio, scope OPENDEMOCRACY)    → can act across all scopes
 func Seed(reg *Registry, svc *bill.Service) error {
 	for _, p := range defaultParticipants() {
 		reg.Add(p)
@@ -42,66 +45,240 @@ func Seed(reg *Registry, svc *bill.Service) error {
 
 func defaultParticipants() []Participant {
 	return []Participant{
-		{ID: "helena", Display: "Helena (root admin)", Claims: []string{"ES:ADMIN"}},
-		{ID: "felipe", Display: "Felipe (Div1 admin)", Claims: []string{"ES:TEACHER_UNION:DIVISION_1:ADMIN"}},
-		{ID: "gala", Display: "Gala (Div2 admin)", Claims: []string{"ES:TEACHER_UNION:DIVISION_2:ADMIN"}},
-		{ID: "ada", Display: "Ada (Div1 proposer)", Claims: []string{"ES:TEACHER_UNION:DIVISION_1:PROPOSER", "ES:TEACHER_UNION:DIVISION_1"}},
-		{ID: "bea", Display: "Bea (Div1 editor)", Claims: []string{"ES:TEACHER_UNION:DIVISION_1:EDITOR", "ES:TEACHER_UNION:DIVISION_1"}},
-		{ID: "carla", Display: "Carla (Div1 voter)", Claims: []string{"ES:TEACHER_UNION:DIVISION_1"}},
-		{ID: "diego", Display: "Diego (Div1 voter)", Claims: []string{"ES:TEACHER_UNION:DIVISION_1"}},
-		{ID: "elena", Display: "Elena (Div1 voter)", Claims: []string{"ES:TEACHER_UNION:DIVISION_1"}},
-		{ID: "ivan", Display: "Iván (Div2 proposer)", Claims: []string{"ES:TEACHER_UNION:DIVISION_2:PROPOSER", "ES:TEACHER_UNION:DIVISION_2"}},
-		{ID: "julia", Display: "Julia (Div2 voter)", Claims: []string{"ES:TEACHER_UNION:DIVISION_2"}},
+		// Project lead — root admin over the entire project scope.
+		{ID: "savio", Display: "Savio (project lead)", Claims: []string{
+			"OPENDEMOCRACY:ADMIN",
+			"OPENDEMOCRACY:PROPOSER",
+			"OPENDEMOCRACY",
+		}},
+		// Senior maintainer — can propose and vote on core decisions.
+		{ID: "alice", Display: "Alice (senior maintainer)", Claims: []string{
+			"OPENDEMOCRACY:CORE:PROPOSER",
+			"OPENDEMOCRACY:COMMUNITY:ADMIN",
+			"OPENDEMOCRACY:CORE",
+			"OPENDEMOCRACY:COMMUNITY",
+		}},
+		// Technical reviewer — can edit proposals and vote.
+		{ID: "bob", Display: "Bob (tech reviewer)", Claims: []string{
+			"OPENDEMOCRACY:CORE:EDITOR",
+			"OPENDEMOCRACY:CORE",
+		}},
+		// Core contributors — vote on architecture and feature decisions.
+		{ID: "carol", Display: "Carol (core contributor)", Claims: []string{
+			"OPENDEMOCRACY:CORE",
+		}},
+		{ID: "dave", Display: "Dave (core contributor)", Claims: []string{
+			"OPENDEMOCRACY:CORE",
+		}},
+		{ID: "eve", Display: "Eve (core contributor)", Claims: []string{
+			"OPENDEMOCRACY:CORE",
+		}},
+		// Community contributors — can propose and vote on community-scoped items.
+		{ID: "frank", Display: "Frank (community contributor)", Claims: []string{
+			"OPENDEMOCRACY:COMMUNITY:PROPOSER",
+			"OPENDEMOCRACY:COMMUNITY",
+		}},
+		{ID: "grace", Display: "Grace (community contributor)", Claims: []string{
+			"OPENDEMOCRACY:COMMUNITY",
+		}},
 	}
 }
 
 func seedSampleBills(reg *Registry, svc *bill.Service) error {
 	now := time.Now().Unix()
-	ada, _ := reg.Get("ada")
-	felipe, _ := reg.Get("felipe")
-	helena, _ := reg.Get("helena")
-	ivan, _ := reg.Get("ivan")
-	gala, _ := reg.Get("gala")
+	savio, _ := reg.Get("savio")
+	alice, _ := reg.Get("alice")
+	bob, _ := reg.Get("bob")
+	carol, _ := reg.Get("carol")
+	dave, _ := reg.Get("dave")
+	frank, _ := reg.Get("frank")
 
-	// Bill 1: Division 1 proposal, in draft, with assigned voters and one
-	// version vote already cast so the dashboard shows non-trivial state.
-	if err := svc.CreateBill(ada.Invoker(), now, "BILL-001",
-		"QmExampleHashOne",
-		"Adopt remote teaching guidelines for Division 1",
+	// ── PROP-001: Architecture decision — extract Service layer ──────
+	//
+	// This mirrors the actual refactoring that was done in this repo:
+	// separating chaincode business logic into a pure-Go Service so the
+	// same rules run both inside Fabric and in the gateway. Already
+	// agreed and executed — demonstrates a completed governance cycle.
+	if err := svc.CreateBill(alice.Invoker(), now-3600, "PROP-001",
+		"QmServiceLayerRefactor2024",
+		"Extract chaincode business logic into a reusable Service layer decoupled from Fabric stub interfaces",
 		"0.5",
-		"ES:TEACHER_UNION:DIVISION_1:*",
+		"OPENDEMOCRACY:CORE:*",
 		"YES", "NO",
 	); err != nil {
-		return fmt.Errorf("seed BILL-001: %w", err)
+		return fmt.Errorf("seed PROP-001: %w", err)
 	}
-	for _, vid := range []string{"carla", "diego", "elena", "ada"} {
-		if err := svc.AssignRoleForBill(felipe.Invoker(), "BILL-001", vid, "VOTER"); err != nil {
-			return fmt.Errorf("seed assign %s: %w", vid, err)
+	// Assign all core members as voters
+	for _, vid := range []string{"alice", "bob", "carol", "dave", "eve"} {
+		if err := svc.AssignRoleForBill(savio.Invoker(), "PROP-001", vid, "VOTER"); err != nil {
+			return fmt.Errorf("seed assign %s to PROP-001: %w", vid, err)
 		}
 	}
-	if err := svc.AssignRoleForBill(helena.Invoker(), "BILL-001", "bea", "EDITOR"); err != nil {
-		return fmt.Errorf("seed assign bea: %w", err)
+	if err := svc.AssignRoleForBill(savio.Invoker(), "PROP-001", "bob", "EDITOR"); err != nil {
+		return fmt.Errorf("seed assign bob editor PROP-001: %w", err)
 	}
-	carla, _ := reg.Get("carla")
-	if err := svc.VoteOnVersion(carla.Invoker(), now+1, "BILL-001", "0", "YES"); err != nil {
-		return fmt.Errorf("seed carla vote: %w", err)
+	// Bob edits: adds implementation details
+	if err := svc.EditBill(bob.Invoker(), now-3500, "PROP-001",
+		"QmServiceLayerRefactorV2",
+		"v2: adds Store/EventSink interfaces and MemStore for gateway + tests",
+	); err != nil {
+		return fmt.Errorf("seed PROP-001 edit: %w", err)
+	}
+	// Core team votes on version 1 (the refined one). 3 of 5 is enough for
+	// 50% quorum — the version is agreed after the third YES.
+	for _, v := range []struct {
+		id     string
+		choice string
+	}{
+		{"alice", "YES"}, {"bob", "YES"}, {"carol", "YES"},
+	} {
+		p, _ := reg.Get(v.id)
+		if err := svc.VoteOnVersion(p.Invoker(), now-3400, "PROP-001", "1", v.choice); err != nil {
+			return fmt.Errorf("seed %s vote PROP-001: %w", v.id, err)
+		}
+	}
+	// Submit for formal voting, cast votes, end → executed
+	if err := svc.SubmitBill(alice.Invoker(), "PROP-001",
+		fmt.Sprintf("%d", now-3300), "600",
+	); err != nil {
+		return fmt.Errorf("seed submit PROP-001: %w", err)
+	}
+	for _, v := range []struct {
+		id     string
+		choice string
+	}{
+		{"alice", "YES"}, {"bob", "YES"}, {"carol", "YES"}, {"dave", "YES"}, {"eve", "ABSTAIN"},
+	} {
+		p, _ := reg.Get(v.id)
+		if err := svc.CastVote(p.Invoker(), now-3200, "PROP-001", v.choice); err != nil {
+			return fmt.Errorf("seed %s cast PROP-001: %w", v.id, err)
+		}
+	}
+	if err := svc.EndVote(savio.Invoker(), now-2600, "PROP-001"); err != nil {
+		return fmt.Errorf("seed end PROP-001: %w", err)
 	}
 
-	// Bill 2: Division 2 proposal, in draft, no votes yet, includes ABSENCE
-	// in reject mask so the dashboard shows criteria handling.
-	if err := svc.CreateBill(ivan.Invoker(), now, "BILL-002",
-		"QmExampleHashTwo",
-		"Allocate Division 2 budget for Q3",
+	// ── PROP-002: Feature proposal — Hotwire Turbo + Tailwind CSS ────
+	//
+	// Currently in draft with version agreement reached. The team voted
+	// to migrate the frontend; the owner can now open the formal window.
+	if err := svc.CreateBill(alice.Invoker(), now-1800, "PROP-002",
+		"QmHotwireTurboTailwind",
+		"Migrate dashboard frontend from hand-written CSS to Tailwind CSS with Hotwire Turbo for partial page updates and Turbo Streams over SSE",
+		"0.5",
+		"OPENDEMOCRACY:CORE:*",
+		"YES", "NO",
+	); err != nil {
+		return fmt.Errorf("seed PROP-002: %w", err)
+	}
+	for _, vid := range []string{"alice", "bob", "carol", "dave", "eve"} {
+		if err := svc.AssignRoleForBill(savio.Invoker(), "PROP-002", vid, "VOTER"); err != nil {
+			return fmt.Errorf("seed assign %s to PROP-002: %w", vid, err)
+		}
+	}
+	for _, v := range []struct {
+		id     string
+		choice string
+	}{
+		{"alice", "YES"}, {"carol", "YES"}, {"dave", "YES"},
+	} {
+		p, _ := reg.Get(v.id)
+		if err := svc.VoteOnVersion(p.Invoker(), now-1700, "PROP-002", "0", v.choice); err != nil {
+			return fmt.Errorf("seed %s vote PROP-002: %w", v.id, err)
+		}
+	}
+	// Version 0 is now agreed (3/5 ≥ 50% quorum, YES > NO). Owner can submit.
+
+	// ── PROP-003: Governance policy — require 60% quorum + absence counts ─
+	//
+	// A proposal to tighten governance rules: future architecture decisions
+	// should require 60% quorum and treat absent voters as implicit rejections.
+	// This uses ABSENCE in the reject mask so that people who don't show up
+	// effectively block change — forcing active engagement. Currently in draft,
+	// one version vote cast. Demonstrates the criteria mask system.
+	if err := svc.CreateBill(savio.Invoker(), now-900, "PROP-003",
+		"QmGovernanceQuorumPolicy",
+		"Require 60% quorum for architecture decisions; count absent voters toward rejection to ensure active participation",
 		"0.6",
-		"ES:TEACHER_UNION:DIVISION_2:*",
+		"OPENDEMOCRACY:CORE:*",
 		"YES", "NO|ABSENCE",
 	); err != nil {
-		return fmt.Errorf("seed BILL-002: %w", err)
+		return fmt.Errorf("seed PROP-003: %w", err)
 	}
-	for _, vid := range []string{"julia", "ivan"} {
-		if err := svc.AssignRoleForBill(gala.Invoker(), "BILL-002", vid, "VOTER"); err != nil {
-			return fmt.Errorf("seed assign %s: %w", vid, err)
+	for _, vid := range []string{"alice", "bob", "carol", "dave", "eve"} {
+		if err := svc.AssignRoleForBill(savio.Invoker(), "PROP-003", vid, "VOTER"); err != nil {
+			return fmt.Errorf("seed assign %s to PROP-003: %w", vid, err)
 		}
+	}
+	if err := svc.VoteOnVersion(carol.Invoker(), now-800, "PROP-003", "0", "YES"); err != nil {
+		return fmt.Errorf("seed carol vote PROP-003: %w", err)
+	}
+
+	// ── PROP-004: Community scope — contributor onboarding guide ──────
+	//
+	// A community-scoped proposal (not core architecture). Demonstrates
+	// the hierarchical scope system: community contributors can propose
+	// and vote here, while core decisions are gated to core members.
+	if err := svc.CreateBill(frank.Invoker(), now-600, "PROP-004",
+		"QmContributorOnboarding",
+		"Write a contributor onboarding guide covering local setup, coding standards, and the proposal workflow itself",
+		"0.5",
+		"OPENDEMOCRACY:COMMUNITY:*",
+		"YES", "NO",
+	); err != nil {
+		return fmt.Errorf("seed PROP-004: %w", err)
+	}
+	for _, vid := range []string{"frank", "grace"} {
+		if err := svc.AssignRoleForBill(alice.Invoker(), "PROP-004", vid, "VOTER"); err != nil {
+			return fmt.Errorf("seed assign %s to PROP-004: %w", vid, err)
+		}
+	}
+
+	// ── PROP-005: Release approval — v0.2.0 ──────────────────────────
+	//
+	// A formal vote on whether to cut a release. This is the kind of
+	// decision a real project would gate behind the bill system: nobody
+	// ships unless a quorum of maintainers agrees the code is ready.
+	// Currently in the voting window (open for 24h from seed time).
+	if err := svc.CreateBill(savio.Invoker(), now-300, "PROP-005",
+		"QmReleaseV020Checklist",
+		"Approve release v0.2.0: gateway + dashboard + Tailwind/Turbo frontend, containerized with docker-compose",
+		"0.6",
+		"OPENDEMOCRACY:CORE:*",
+		"YES", "NO",
+	); err != nil {
+		return fmt.Errorf("seed PROP-005: %w", err)
+	}
+	for _, vid := range []string{"alice", "bob", "carol", "dave", "eve"} {
+		if err := svc.AssignRoleForBill(savio.Invoker(), "PROP-005", vid, "VOTER"); err != nil {
+			return fmt.Errorf("seed assign %s to PROP-005: %w", vid, err)
+		}
+	}
+	// Three voters approve the version — 3/5 = 60% meets the quorum.
+	for _, v := range []struct {
+		id     string
+		choice string
+	}{
+		{"alice", "YES"}, {"bob", "YES"}, {"carol", "YES"},
+	} {
+		p, _ := reg.Get(v.id)
+		if err := svc.VoteOnVersion(p.Invoker(), now-250, "PROP-005", "0", v.choice); err != nil {
+			return fmt.Errorf("seed %s vote PROP-005: %w", v.id, err)
+		}
+	}
+	// Open a 24-hour voting window
+	if err := svc.SubmitBill(savio.Invoker(), "PROP-005",
+		fmt.Sprintf("%d", now-200), "86400",
+	); err != nil {
+		return fmt.Errorf("seed submit PROP-005: %w", err)
+	}
+	// Two early votes cast; others haven't voted yet — the dashboard
+	// shows an active voting window the user can interact with.
+	if err := svc.CastVote(alice.Invoker(), now-150, "PROP-005", "YES"); err != nil {
+		return fmt.Errorf("seed alice cast PROP-005: %w", err)
+	}
+	if err := svc.CastVote(dave.Invoker(), now-100, "PROP-005", "YES"); err != nil {
+		return fmt.Errorf("seed dave cast PROP-005: %w", err)
 	}
 
 	return nil

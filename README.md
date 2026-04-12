@@ -17,18 +17,29 @@ docker compose up --build
 # then open http://localhost:8080/
 ```
 
-The first boot seeds a small federation of demo participants (Ada the proposer,
-Felipe the Division 1 admin, Helena the root admin, voters, etc.) and two
-sample bills so the dashboard has something to render. Use the "Acting as"
-selector in the header to switch between identities and exercise the workflow:
+The first boot seeds the ledger with **the project's own governance structure**
+— participants are project contributors (Savio the lead, Alice the senior
+maintainer, Bob the reviewer, community members, etc.) and proposals represent
+real repository decisions:
 
-- Create a bill (PROPOSER or ADMIN authority required for the chosen scope)
+| Proposal | Status | Purpose |
+|---|---|---|
+| **PROP-001** | `executed` | Architecture decision: extract the Service layer (completed full cycle) |
+| **PROP-002** | `draft` (agreed) | Feature: migrate to Hotwire Turbo + Tailwind (ready for voting window) |
+| **PROP-003** | `draft` | Governance: tighten quorum to 60% and count absence as rejection |
+| **PROP-004** | `draft` | Community: contributor onboarding guide (community scope, not core) |
+| **PROP-005** | `voting` | Release approval: v0.2.0 (active window, 2 of 5 votes cast — try it!) |
+
+Use the "Acting as" selector in the header to switch between identities and
+exercise the workflow:
+
+- Create a proposal (PROPOSER or ADMIN authority required for the chosen scope)
 - Add new versions while in draft (EDITOR or owner)
 - Assign per-bill roles (ADMIN with hierarchical scope coverage)
 - Vote on a draft version (VOTER role) until quorum + criteria are met → version is "agreed"
 - Open the formal voting window (owner / proposer)
 - Cast formal votes within the window (VOTER)
-- End the vote and watch the bill transition to `executed` or `rejected`
+- End the vote and watch the proposal transition to `executed` or `rejected`
 
 The bill ledger persists to a Docker volume (`open-democracy-ledger`), so the
 dashboard survives restarts. Drop the volume with `docker compose down -v` to
