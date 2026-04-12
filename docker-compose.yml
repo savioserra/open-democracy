@@ -1,0 +1,39 @@
+# Compose stack for the open-democracy dashboard.
+#
+#   docker compose up --build
+#
+# brings up the gateway with the in-process bill ledger persisted to a named
+# volume so the dashboard survives container restarts. The dashboard is then
+# reachable at http://localhost:8080/.
+#
+# This stack does NOT spin up a Hyperledger Fabric network. The gateway runs
+# the same Service the chaincode wraps, in-process, against a JSON-backed
+# store. To deploy the chaincode against a real Fabric network, follow the
+# Deployment section of the README.
+
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: open-democracy-gateway:latest
+    container_name: open-democracy-gateway
+    ports:
+      - "8080:8080"
+    environment:
+      GATEWAY_ADDR: ":8080"
+      GATEWAY_DATA: "/data"
+      GATEWAY_USER: "ada"
+    volumes:
+      - ledger-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/app/gateway", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+volumes:
+  ledger-data:
+    name: open-democracy-ledger

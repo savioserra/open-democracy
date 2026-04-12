@@ -1,0 +1,35 @@
+{{define "layout"}}<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{{.Title}} · Open Democracy</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <h1><a href="/">Open Democracy</a></h1>
+  <nav>
+    <a href="/" class="{{if eq .Active "bills"}}active{{end}}">Bills</a>
+    <a href="/entities" class="{{if eq .Active "entities"}}active{{end}}">Entities</a>
+    <a href="/participants" class="{{if eq .Active "participants"}}active{{end}}">Participants</a>
+    <a href="/events" class="{{if eq .Active "events"}}active{{end}}">Events</a>
+  </nav>
+  <form method="get" class="user-switch" action="">
+    <label>Acting as:
+      <select name="as" onchange="this.form.submit()">
+        {{range .Users}}
+          <option value="{{.ID}}" {{if eq .ID $.AsUser}}selected{{end}}>{{.Display}}</option>
+        {{end}}
+      </select>
+    </label>
+  </form>
+</header>
+{{if .Flash}}<div class="flash ok">{{.Flash}}</div>{{end}}
+{{if .FlashErr}}<div class="flash err">{{.FlashErr}}</div>{{end}}
+<main>
+{{template "content" .}}
+</main>
+<footer><small>open-democracy gateway · in-process ledger · <a href="/api/health">/api/health</a></small></footer>
+</body>
+</html>{{end}}

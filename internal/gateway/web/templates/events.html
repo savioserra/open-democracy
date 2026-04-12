@@ -1,0 +1,32 @@
+{{define "content"}}
+<section class="page-header">
+  <h2>Events</h2>
+  <p>Domain events emitted by the bill ledger, in chronological order. The list updates live via Server-Sent Events on <code>/api/events/stream</code>.</p>
+</section>
+
+<ul id="event-list" class="events">
+  {{range .Data}}
+    <li data-seq="{{.Seq}}">
+      <strong>{{.Name}}</strong>
+      <time>{{.Time.Format "2006-01-02 15:04:05"}}</time>
+      <pre>{{printf "%s" .Payload}}</pre>
+    </li>
+  {{end}}
+</ul>
+
+<script>
+  const list = document.getElementById('event-list');
+  const es = new EventSource('/api/events/stream');
+  es.onmessage = (m) => prepend(JSON.parse(m.data));
+  ['BillCreated','BillVersionAdded','VersionVoteAdded','VersionAgreed','VoteStarted','VoteEnded','CriteriaUpdated'].forEach(n => {
+    es.addEventListener(n, (e) => prepend(JSON.parse(e.data)));
+  });
+  function prepend(ev) {
+    if (list.querySelector(`[data-seq="${ev.seq}"]`)) return;
+    const li = document.createElement('li');
+    li.dataset.seq = ev.seq;
+    li.innerHTML = `<strong>${ev.name}</strong> <time>${new Date(ev.time).toLocaleString()}</time><pre>${JSON.stringify(ev.payload, null, 2)}</pre>`;
+    list.prepend(li);
+  }
+</script>
+{{end}}

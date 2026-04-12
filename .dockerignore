@@ -1,0 +1,13 @@
+.git
+.gitignore
+.github
+.idea
+.vscode
+*.md
+!README.md
+data
+/tmp
+*.test
+*.out
+*.log
+node_modules

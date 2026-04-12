@@ -1,0 +1,21 @@
+{{define "content"}}
+<section class="page-header">
+  <h2>Participants</h2>
+  <p>The directory of identities the gateway can sign as. In a real Fabric deployment each entry corresponds to an X.509 certificate carrying scope claims; here it is seeded in-process for demo use.</p>
+</section>
+
+<table class="participants">
+  <thead><tr><th>ID</th><th>Display</th><th>Scope claims</th></tr></thead>
+  <tbody>
+    {{range .Data}}
+      <tr>
+        <td><code>{{.ID}}</code></td>
+        <td>{{.Display}}</td>
+        <td>
+          {{range .Claims}}<code class="claim">{{.}}</code> {{end}}
+        </td>
+      </tr>
+    {{end}}
+  </tbody>
+</table>
+{{end}}

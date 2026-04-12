@@ -19,20 +19,56 @@ var authorityRoles = map[string]Role{
 }
 
 // Invoker encapsulates transaction invoker identity and attributes.
-// It provides utility methods for RBAC and hierarchical scope checks.
+// It is a pure data carrier built either from a Fabric transaction context
+// (via GetInvoker) or directly by the gateway from a seeded user record
+// (via NewInvoker). It provides utility methods for RBAC and hierarchical
+// scope checks.
 type Invoker struct {
-    ctx    contractapi.TransactionContextInterface
-    ID     string
+    ID string
     // Claims maps (bitwise) Role -> list of scope patterns (uppercase) where the role applies.
     Claims map[Role][]string
     // Scopes holds scope-only patterns (role stripped) for general InScope checks.
     Scopes []string
 }
 
+// NewInvoker constructs an Invoker from a user id and a list of raw claim
+// strings of the form "SEG1:SEG2:...:ROLE" or just "SEG1:SEG2:..." for a
+// scope-only assignment.
+func NewInvoker(id string, rawClaims []string) *Invoker {
+    inv := &Invoker{ID: id, Claims: map[Role][]string{}, Scopes: []string{}}
+    for _, raw := range rawClaims {
+        inv.addClaim(raw)
+    }
+    return inv
+}
+
+func (i *Invoker) addClaim(raw string) {
+    raw = strings.TrimSpace(raw)
+    if raw == "" {
+        return
+    }
+    up := normalizeScopePattern(raw)
+    parts := splitScopePath(up)
+    if len(parts) == 0 {
+        return
+    }
+    last := parts[len(parts)-1]
+    if roleBit, ok := authorityRoles[last]; ok {
+        scopeOnly := strings.Join(parts[:len(parts)-1], ":")
+        if scopeOnly != "" {
+            i.Claims[roleBit] = uniqueAppend(i.Claims[roleBit], scopeOnly)
+            i.Scopes = uniqueAppend(i.Scopes, scopeOnly)
+        }
+        return
+    }
+    i.Scopes = uniqueAppend(i.Scopes, up)
+}
+
 // GetInvoker builds an Invoker from the transaction context attributes.
-// It reads attributes "scope" and "scopes" (CSV). Each entry can be either a plain scope
-// (e.g., "ES:TEACHER_UNION:DIVISION_2:*") or a scope with role suffix (e.g., "ES:...:ADMIN").
-// If the last segment matches a known role token, it is treated as the role; otherwise it's a plain scope.
+// It reads attributes "scope" and "scopes" (CSV). Each entry can be either a
+// plain scope (e.g., "ES:TEACHER_UNION:DIVISION_2:*") or a scope with role
+// suffix (e.g., "ES:...:ADMIN"). If the last segment matches a known role
+// token, it is treated as the role; otherwise it's a plain scope.
 func GetInvoker(ctx contractapi.TransactionContextInterface) (*Invoker, error) {
     id, err := cid.GetID(ctx.GetStub())
     if err != nil {
@@ -41,45 +77,14 @@ func GetInvoker(ctx contractapi.TransactionContextInterface) (*Invoker, error) {
     scopeAttr, _, _ := cid.GetAttributeValue(ctx.GetStub(), "scope")
     scopesAttr, _, _ := cid.GetAttributeValue(ctx.GetStub(), "scopes")
 
-    claims := map[Role][]string{}
-    scopes := make([]string, 0)
-
-    addClaim := func(raw string) {
-        raw = strings.TrimSpace(raw)
-        if raw == "" {
-            return
-        }
-        up := normalizeScopePattern(raw)
-        parts := splitScopePath(up)
-        if len(parts) == 0 {
-            return
-        }
-        last := parts[len(parts)-1]
-        if roleBit, ok := authorityRoles[last]; ok {
-            scopeOnly := strings.Join(parts[:len(parts)-1], ":")
-            if scopeOnly != "" {
-                claims[roleBit] = uniqueAppend(claims[roleBit], scopeOnly)
-                scopes = uniqueAppend(scopes, scopeOnly)
-            }
-            return
-        }
-        // plain scope pattern
-        scopes = uniqueAppend(scopes, up)
-    }
-
+    inv := &Invoker{ID: id, Claims: map[Role][]string{}, Scopes: []string{}}
     if s := strings.TrimSpace(scopeAttr); s != "" {
-        addClaim(s)
+        inv.addClaim(s)
     }
     for _, s := range splitCSV(scopesAttr) {
-        addClaim(s)
+        inv.addClaim(s)
     }
-
-    return &Invoker{
-        ctx:    ctx,
-        ID:     id,
-        Claims: claims,
-        Scopes: scopes,
-    }, nil
+    return inv, nil
 }
 
 // HasRole checks if invoker has a per-bill Role mask.

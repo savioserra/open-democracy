@@ -1,0 +1,46 @@
+{{define "content"}}
+<section class="page-header">
+  <h2>Bills</h2>
+  <p>The complete bill ledger as recorded in the in-process Open Democracy chaincode.</p>
+</section>
+
+{{$bills := .Data.Bills}}
+{{if $bills}}
+<table class="bills">
+  <thead>
+    <tr><th>ID</th><th>Status</th><th>Owner</th><th>Scope</th><th>Quorum</th><th>Versions</th><th>Voters</th><th>Agreed</th></tr>
+  </thead>
+  <tbody>
+  {{range $bills}}
+    <tr>
+      <td><a href="/bills/{{.ID}}">{{.ID}}</a></td>
+      <td><span class="status status-{{.Status}}">{{.Status}}</span></td>
+      <td>{{.Owner}}</td>
+      <td><code>{{.Scope}}</code></td>
+      <td>{{.Quorum}}</td>
+      <td>{{len .Versions}}</td>
+      <td>{{len .Roles}}</td>
+      <td>{{if ge .AgreedVersionIndex 0}}v{{.AgreedVersionIndex}}{{else}}—{{end}}</td>
+    </tr>
+  {{end}}
+  </tbody>
+</table>
+{{else}}
+<p class="empty">No bills yet. Create one below to get started.</p>
+{{end}}
+
+<section class="card">
+  <h3>Create a bill</h3>
+  <form method="post" action="/actions/create-bill">
+    <input type="hidden" name="_user" value="{{.AsUser}}">
+    <label>Bill ID <input name="id" required placeholder="BILL-003"></label>
+    <label>IPFS hash <input name="ipfsHash" required placeholder="QmExampleHash"></label>
+    <label class="wide">Description <input name="description" required placeholder="Adopt new policy …"></label>
+    <label>Quorum <input name="quorum" value="0.5"></label>
+    <label>Scope <input name="scope" placeholder="ES:TEACHER_UNION:DIVISION_1:*"></label>
+    <label>Execute mask <input name="executeMask" value="YES"></label>
+    <label>Reject mask <input name="rejectMask" value="NO"></label>
+    <button type="submit">Create</button>
+  </form>
+</section>
+{{end}}

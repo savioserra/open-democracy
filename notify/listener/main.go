@@ -1,3 +1,11 @@
+//go:build fabric_sdk
+// +build fabric_sdk
+
+// This listener targets a real Fabric network via fabric-sdk-go. That SDK is
+// end-of-life and incompatible with the version of fabric-protos-go pulled in
+// by the chaincode, so it is gated behind the `fabric_sdk` build tag and is
+// not compiled by default. Use the in-process gateway under cmd/gateway for
+// the dashboard scenario.
 package main
 
 import (

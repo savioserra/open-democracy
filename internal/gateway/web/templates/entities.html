@@ -1,0 +1,35 @@
+{{define "content"}}
+<section class="page-header">
+  <h2>Entities</h2>
+  <p>Top-level scope segments derived from bills and participant claims. This is the federation view of the polity — each entity groups the bills it owns and the participants whose claims sit under it.</p>
+</section>
+
+{{if .Data}}
+<div class="grid">
+  {{range .Data}}
+    <section class="card">
+      <h3>{{.Name}}</h3>
+      <h4>Bills ({{len .BillIDs}})</h4>
+      {{if .BillIDs}}
+        <ul>
+          {{range .BillIDs}}
+            <li><a href="/bills/{{.}}">{{.}}</a></li>
+          {{end}}
+        </ul>
+      {{else}}<p class="empty">No bills.</p>{{end}}
+
+      <h4>Participants ({{len .Participants}})</h4>
+      {{if .Participants}}
+        <ul>
+          {{range .Participants}}
+            <li><code>{{.}}</code></li>
+          {{end}}
+        </ul>
+      {{else}}<p class="empty">No participants.</p>{{end}}
+    </section>
+  {{end}}
+</div>
+{{else}}
+<p class="empty">No entities yet — create a bill with a scope to populate this view.</p>
+{{end}}
+{{end}}
