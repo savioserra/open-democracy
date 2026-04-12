@@ -425,7 +425,7 @@ func TestCollectingBillAnyoneCanCreate(t *testing.T) {
 	svc, sink := newTestService()
 	// "nobody" has no roles at all — they should still be able to create a collecting bill.
 	nobody := NewInvoker("nobody", []string{"ES:UNION"})
-	if err := svc.CreateCollectingBill(nobody, 1, "PET-1", "QmP", "demand X", "ES:UNION:*", "0.5", "YES", "NO", 3); err != nil {
+	if err := svc.CreateCollectingBill(nobody, 1, "PET-1", "QmP", "demand X", "ES:UNION:*", "0.5", "YES", "NO", 3, nil); err != nil {
 		t.Fatalf("create collecting bill: %v", err)
 	}
 	b, err := svc.GetBill("PET-1")
@@ -451,7 +451,7 @@ func TestCollectingThresholdAdvancesToDraft(t *testing.T) {
 	community2 := NewInvoker("grace", []string{"ES:COMMUNITY"})
 	community3 := NewInvoker("hank", []string{"ES:COMMUNITY"})
 
-	if err := svc.CreateCollectingBill(community1, 1, "PET-X", "QmX", "community demands feature X at core level", "ES:CORE:*", "0.5", "YES", "NO", 3); err != nil {
+	if err := svc.CreateCollectingBill(community1, 1, "PET-X", "QmX", "community demands feature X at core level", "ES:CORE:*", "0.5", "YES", "NO", 3, nil); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 
@@ -493,7 +493,7 @@ func TestCollectingThresholdAdvancesToDraft(t *testing.T) {
 func TestCollectingRejectsDuplicateSignature(t *testing.T) {
 	svc, _ := newTestService()
 	u := NewInvoker("u1", []string{"ES"})
-	_ = svc.CreateCollectingBill(u, 1, "PET-D", "Qm", "dup", "ES:*", "0.5", "YES", "NO", 5)
+	_ = svc.CreateCollectingBill(u, 1, "PET-D", "Qm", "dup", "ES:*", "0.5", "YES", "NO", 5, nil)
 	if err := svc.SignBill(u, 2, "PET-D", nil); err == nil {
 		t.Fatal("expected duplicate signature error")
 	}
@@ -502,7 +502,7 @@ func TestCollectingRejectsDuplicateSignature(t *testing.T) {
 func TestCollectingCannotSignAfterDraft(t *testing.T) {
 	svc, _ := newTestService()
 	u1 := NewInvoker("u1", []string{"ES"})
-	_ = svc.CreateCollectingBill(u1, 1, "PET-T", "Qm", "t", "ES:*", "0.5", "YES", "NO", 1)
+	_ = svc.CreateCollectingBill(u1, 1, "PET-T", "Qm", "t", "ES:*", "0.5", "YES", "NO", 1, nil)
 	// threshold=1 means the creator's auto-signature already advanced it.
 	b, _ := svc.GetBill("PET-T")
 	if b.Status != StatusDraft {
@@ -518,7 +518,7 @@ func TestCollectingBillsAppearInListBills(t *testing.T) {
 	svc, _ := newTestService()
 	u := NewInvoker("u1", []string{"ES:PROPOSER"})
 	for _, id := range []string{"C1", "C2", "C3"} {
-		_ = svc.CreateCollectingBill(u, 1, id, "Qm", "d", "ES:*", "0.5", "YES", "NO", 10)
+		_ = svc.CreateCollectingBill(u, 1, id, "Qm", "d", "ES:*", "0.5", "YES", "NO", 10, nil)
 	}
 	bills, err := svc.ListBills()
 	if err != nil {
@@ -539,7 +539,7 @@ func TestEditCollectingBillResetsSignatures(t *testing.T) {
 	creator := NewInvoker("alice", []string{"ES:UNION"})
 	signer := NewInvoker("bob", []string{"ES:UNION"})
 
-	_ = svc.CreateCollectingBill(creator, 1, "CB-E", "QmOld", "original", "ES:UNION:*", "0.5", "YES", "NO", 3)
+	_ = svc.CreateCollectingBill(creator, 1, "CB-E", "QmOld", "original", "ES:UNION:*", "0.5", "YES", "NO", 3, nil)
 	// Bob signs the original content.
 	if err := svc.SignBill(signer, 2, "CB-E", nil); err != nil {
 		t.Fatalf("sign: %v", err)

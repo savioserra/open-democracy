@@ -471,9 +471,11 @@ func (s *Server) handleFormCreateCollectingBill(w http.ResponseWriter, r *http.R
 		}
 	}
 	billID := r.FormValue("id")
+	targetScope := r.FormValue("targetScope")
+	eligible := s.eligibleVotersForScope(targetScope)
 	err = s.svc.CreateCollectingBill(caller, time.Now().Unix(),
 		billID, r.FormValue("ipfsHash"), r.FormValue("description"),
-		r.FormValue("targetScope"), q, r.FormValue("executeMask"), r.FormValue("rejectMask"), threshold,
+		targetScope, q, r.FormValue("executeMask"), r.FormValue("rejectMask"), threshold, eligible,
 	)
 	target := "/petitions"
 	if err == nil {

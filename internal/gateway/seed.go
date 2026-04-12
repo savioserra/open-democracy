@@ -294,7 +294,8 @@ func seedSampleBills(reg *Registry, svc *bill.Service) error {
 		"OPENDEMOCRACY:CORE:*",
 		"0.5",
 		"YES", "NO",
-		3, // threshold: 3 signatures needed
+		3,   // threshold: 3 signatures needed
+		nil, // eligible voters resolved at transition time (via SignBill)
 	); err != nil {
 		return fmt.Errorf("seed PET-001: %w", err)
 	}

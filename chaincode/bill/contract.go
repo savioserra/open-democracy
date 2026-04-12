@@ -144,7 +144,9 @@ func (c *BillContract) SetBillCriteria(ctx contractapi.TransactionContextInterfa
 
 // CreateCollectingBill creates a bill in "collecting" status (popular
 // initiative). Anyone can call this — no PROPOSER/ADMIN role required.
-func (c *BillContract) CreateCollectingBill(ctx contractapi.TransactionContextInterface, billID, ipfsHash, description, targetScope, quorum, executeMask, rejectMask, threshold string) error {
+// eligibleVotersCSV is a comma-separated list of participant IDs to enroll
+// as VOTER if the threshold is met immediately at creation (threshold == 1).
+func (c *BillContract) CreateCollectingBill(ctx contractapi.TransactionContextInterface, billID, ipfsHash, description, targetScope, quorum, executeMask, rejectMask, threshold, eligibleVotersCSV string) error {
 	caller, err := GetInvoker(ctx)
 	if err != nil {
 		return err
@@ -157,7 +159,8 @@ func (c *BillContract) CreateCollectingBill(ctx contractapi.TransactionContextIn
 	if err != nil || th < 1 {
 		return fmt.Errorf("invalid threshold: %s", threshold)
 	}
-	return c.service(ctx).CreateCollectingBill(caller, now, billID, ipfsHash, description, targetScope, quorum, executeMask, rejectMask, th)
+	eligible := splitCSV(eligibleVotersCSV)
+	return c.service(ctx).CreateCollectingBill(caller, now, billID, ipfsHash, description, targetScope, quorum, executeMask, rejectMask, th, eligible)
 }
 
 // SignBill adds a signature to a collecting-status bill. When the threshold

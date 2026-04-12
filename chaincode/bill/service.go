@@ -648,8 +648,10 @@ func (s *Service) putDelegation(d *Delegation) error {
 // CreateCollectingBill starts a new bill in "collecting" status. Anyone can
 // call this — no role check. The caller specifies how many signatures
 // (threshold) are needed to advance the bill to draft, and at which scope
-// the bill should live.
-func (s *Service) CreateCollectingBill(caller *Invoker, now int64, billID, ipfsHash, description, targetScope, quorum, executeMask, rejectMask string, threshold int) error {
+// the bill should live. eligibleVoters is the list of participant IDs to
+// enroll as VOTER if the threshold is met immediately at creation time
+// (i.e. threshold == 1); it is passed directly to advanceToDraft.
+func (s *Service) CreateCollectingBill(caller *Invoker, now int64, billID, ipfsHash, description, targetScope, quorum, executeMask, rejectMask string, threshold int, eligibleVoters []string) error {
 	if caller == nil {
 		return errors.New("caller is required")
 	}
@@ -704,7 +706,7 @@ func (s *Service) CreateCollectingBill(caller *Invoker, now int64, billID, ipfsH
 
 	// If threshold == 1, the initiator's own signature triggers immediately.
 	if len(b.Signatures) >= b.Threshold {
-		s.advanceToDraft(b, nil)
+		s.advanceToDraft(b, eligibleVoters)
 		triggerPayload, _ := json.Marshal(map[string]any{"billId": billID, "signatures": len(b.Signatures)})
 		_ = s.events.Emit("BillCollected", triggerPayload)
 	}

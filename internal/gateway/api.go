@@ -177,7 +177,8 @@ func (s *Server) handleAPICreateBill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.Threshold > 0 {
-		if err := s.svc.CreateCollectingBill(caller, time.Now().Unix(), req.ID, req.IPFSHash, req.Description, req.Scope, q, req.ExecuteMask, req.RejectMask, req.Threshold); err != nil {
+		eligible := s.eligibleVotersForScope(req.Scope)
+		if err := s.svc.CreateCollectingBill(caller, time.Now().Unix(), req.ID, req.IPFSHash, req.Description, req.Scope, q, req.ExecuteMask, req.RejectMask, req.Threshold, eligible); err != nil {
 			writeErr(w, http.StatusBadRequest, err)
 			return
 		}
@@ -405,6 +406,18 @@ func (s *Server) handleAPISignBill(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// eligibleVotersForScope returns all participant IDs whose scope covers the
+// given scope pattern. Used when a collecting bill transitions to draft.
+func (s *Server) eligibleVotersForScope(scope string) []string {
+	var out []string
+	for _, part := range s.registry.List() {
+		if part.Invoker().InScope(scope) {
+			out = append(out, part.ID)
+		}
+	}
+	return out
+}
+
 // eligibleVotersForBillScope returns all participant IDs whose scope covers
 // the bill's scope. Used when a collecting bill transitions to draft.
 func (s *Server) eligibleVotersForBillScope(billID string) []string {
@@ -412,14 +425,7 @@ func (s *Server) eligibleVotersForBillScope(billID string) []string {
 	if err != nil {
 		return nil
 	}
-	var out []string
-	for _, part := range s.registry.List() {
-		inv := part.Invoker()
-		if inv.InScope(b.Scope) {
-			out = append(out, part.ID)
-		}
-	}
-	return out
+	return s.eligibleVotersForScope(b.Scope)
 }
 
 // Vote verification ---------------------------------------------------------
