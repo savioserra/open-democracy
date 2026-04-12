@@ -106,10 +106,11 @@ func (c *BillContract) CastVote(ctx contractapi.TransactionContextInterface, bil
 	return c.service(ctx).CastVote(caller, now, billID, choice)
 }
 
-// EndVote finalizes the vote. electorate is the in-scope participant count
-// at close time.
 // EndVote finalizes the vote. electorateCSV is a comma-separated list of
-// in-scope participant IDs used for delegation resolution and ABSENCE.
+// in-scope participant IDs at close time (whitespace around each ID is
+// trimmed; empty tokens are ignored). The list drives delegation resolution
+// and ABSENCE counting. Unknown IDs are silently skipped — they contribute
+// neither a vote nor an absence.
 func (c *BillContract) EndVote(ctx contractapi.TransactionContextInterface, billID, electorateCSV string) error {
 	caller, err := GetInvoker(ctx)
 	if err != nil {
@@ -172,6 +173,34 @@ func (c *BillContract) SignBill(ctx contractapi.TransactionContextInterface, bil
 	}
 	eligible := splitCSV(eligibleVotersCSV)
 	return c.service(ctx).SignBill(caller, now, billID, eligible)
+}
+
+// RegisterParticipant adds a participant to the on-ledger identity roster.
+// claimsCSV is a comma-separated list of scope claims.
+func (c *BillContract) RegisterParticipant(ctx contractapi.TransactionContextInterface, participantID, displayName, claimsCSV string) error {
+	caller, err := GetInvoker(ctx)
+	if err != nil {
+		return err
+	}
+	now, err := txTimestampSeconds(ctx)
+	if err != nil {
+		return err
+	}
+	claims := splitCSV(claimsCSV)
+	return c.service(ctx).RegisterParticipant(caller, now, participantID, displayName, claims)
+}
+
+// RemoveParticipant marks a participant as inactive on the ledger.
+func (c *BillContract) RemoveParticipant(ctx contractapi.TransactionContextInterface, participantID string) error {
+	caller, err := GetInvoker(ctx)
+	if err != nil {
+		return err
+	}
+	now, err := txTimestampSeconds(ctx)
+	if err != nil {
+		return err
+	}
+	return c.service(ctx).RemoveParticipant(caller, now, participantID)
 }
 
 // GetBill returns the bill as a JSON string.

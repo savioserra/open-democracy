@@ -235,3 +235,28 @@ type Bill struct {
     Signatures map[string]int64 `json:"signatures,omitempty"`
 }
 
+// ── Participants (on-ledger identity registry) ────────────────────────────
+//
+// Participants are the on-ledger directory of identities that can act in
+// the governance system. In a real Fabric deployment each participant
+// corresponds to an X.509 certificate carrying scope claims; the on-ledger
+// record makes the roster itself an auditable, governed artifact.
+//
+// Recording participants on-ledger ensures:
+//   - Auditability: who was enrolled, by whom, and when — visible in the
+//     event stream alongside bill votes and delegations.
+//   - Consistency: the same Store that holds bills and delegations also
+//     holds the identity roster, so a Fabric peer's ledger is the single
+//     source of truth.
+//   - Governance: adding or removing participants requires ADMIN authority,
+//     checked by the same scope hierarchy used for bill operations.
+
+// LedgerParticipant is the on-ledger record of a governance identity.
+type LedgerParticipant struct {
+    ID        string   `json:"id"`
+    Display   string   `json:"display"`
+    Claims    []string `json:"claims"`
+    CreatedBy string   `json:"createdBy"`
+    Timestamp int64    `json:"timestamp"`
+    Active    bool     `json:"active"` // false = removed/revoked
+}

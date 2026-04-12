@@ -110,27 +110,38 @@ Optional (for the listener):
 │       └── cmd/
 │           └── main.go         # Chaincode entrypoint
 ├── cmd/
-│   └── gateway/
-│       └── main.go             # Gateway entrypoint (REST + dashboard, persists to JSON)
+│   ├── gateway/
+│   │   └── main.go             # Gateway entrypoint (REST + dashboard, persists to JSON)
+│   └── odctl/
+│       └── main.go             # Federation TUI entrypoint (bubbletea)
 ├── internal/
-│   └── gateway/
-│       ├── server.go           # HTTP server, embedded templates, middleware
-│       ├── routes.go           # Route table
-│       ├── api.go              # REST handlers + DTOs + SSE stream
-│       ├── dashboard.go        # HTML dashboard handlers + form actions
-│       ├── store.go            # JSON file persistence on top of bill.MemStore
-│       ├── identity.go         # Participant registry (gateway's stand-in for X.509)
-│       ├── seed.go             # Seeded participants and sample bills
-│       ├── events.go           # In-process event broadcaster (history + live subscribers)
-│       └── web/
-│           ├── templates/      # layout.html + per-page templates (bill, entities, etc.)
-│           └── static/style.css
+│   ├── gateway/
+│   │   ├── server.go           # HTTP server, embedded templates, middleware
+│   │   ├── routes.go           # Route table
+│   │   ├── api.go              # REST handlers + DTOs + SSE stream
+│   │   ├── dashboard.go        # HTML dashboard handlers + form actions
+│   │   ├── store.go            # JSON file persistence on top of bill.MemStore
+│   │   ├── ca.go               # IdentityProvider interface + Fabric CA integration
+│   │   ├── identity.go         # Participant registry (gateway's stand-in for X.509)
+│   │   ├── seed.go             # Seeded participants and sample bills
+│   │   ├── events.go           # In-process event broadcaster (history + live subscribers)
+│   │   └── web/
+│   │       ├── templates/      # layout.html + per-page templates (bill, entities, etc.)
+│   │       └── static/style.css
+│   └── tui/                    # Federation TUI screens (menu, setup, runner, etc.)
 ├── notify/
 │   └── listener/
 │       └── main.go             # Real-Fabric SDK listener (build tag: fabric_sdk)
+├── docs/
+│   └── DISTRIBUTED_LEDGER_DESIGN.md  # Federation architecture + cross-chain patterns
+├── federation/                 # Multi-org Fabric network setup (see federation/README.md)
+│   ├── docker-compose.fabric.yml     # Founding consortium network
+│   ├── docker-compose.node.yml       # Single-org node for new members
+│   ├── config/                       # Channel config, crypto, connection templates
+│   └── scripts/                      # Bootstrap, onboarding, deployment automation
 ├── Dockerfile                  # Multi-stage static-binary build
 ├── docker-compose.yml          # Single-service stack with persistent volume
-├── Makefile                    # test / build / run / image / up / down / logs
+├── Makefile                    # test / build / odctl / run / image / up / down / logs
 ├── go.mod
 └── README.md
 ```
@@ -233,6 +244,13 @@ The project ships two deployment modes that share the same business logic:
   - Finalize vote; compute participation based on masks, include ABSENCE if configured; set status executed/rejected.
   - Event: VoteEnded { billId, yes, no, abstain, absence, eligible, participation, executeCount, rejectCount, status }
 - GetBill(ctx, billID) → string JSON
+- RegisterParticipant(ctx, participantID, displayName, claimsCSV)
+  - Add a participant to the on-ledger identity roster with scope claims.
+  - Authorization: ADMIN for every scope being granted.
+  - Event: ParticipantRegistered { participantId, display, claims, registeredBy }
+- RemoveParticipant(ctx, participantID)
+  - Mark a participant inactive. Authorization: ADMIN covering the target's claims.
+  - Event: ParticipantRemoved { participantId, removedBy }
 
 Notes:
 - Full text is not stored on-chain; store content in IPFS and reference by hash in Version.
@@ -247,6 +265,13 @@ Notes:
 - VoteStarted
 - VoteEnded
 - CriteriaUpdated
+- DelegationCreated
+- DelegationRevoked
+- PetitionCreated
+- PetitionSigned
+- PetitionTriggered
+- ParticipantRegistered
+- ParticipantRemoved
 
 ## Gateway and Dashboard
 
@@ -256,7 +281,7 @@ chaincode wraps, against a JSON-backed local store, and exposes:
 - **Dashboard pages** (server-rendered with `html/template`)
   - `GET /` — bills list with status, quorum, scope, version count
   - `GET /bills/{id}` — bill detail (versions, roles, formal votes, action forms)
-  - `GET /participants` — directory of seeded identities and their scope claims
+  - `GET /participants` — identity directory with add/remove forms
   - `GET /entities` — top-level scope segments with bills + participants under each
   - `GET /events` — chronological event feed updated live via SSE
 - **REST API** (JSON over HTTP)
@@ -265,8 +290,12 @@ chaincode wraps, against a JSON-backed local store, and exposes:
   - `POST /api/bills/{id}/versions` (edit) · `POST /api/bills/{id}/versions/{idx}/votes`
   - `POST /api/bills/{id}/roles` · `POST /api/bills/{id}/submit`
   - `POST /api/bills/{id}/votes` (cast) · `POST /api/bills/{id}/end`
-  - `GET /api/participants` · `GET /api/entities`
-  - `GET /api/events` · `GET /api/events/stream` (SSE)
+  - `GET /api/participants` · `POST /api/participants` · `DELETE /api/participants/{id}`
+  - `GET /api/delegations` · `POST /api/delegations` · `DELETE /api/delegations/{user}/{scope}`
+  - `GET /api/petitions` · `POST /api/petitions` · `GET /api/petitions/{id}` · `POST /api/petitions/{id}/sign`
+  - `GET /api/votes/{voteId}` (receipt verification)
+  - `GET /api/entities`
+  - `GET /api/events` · `GET /api/events/stream` (SSE) · `GET /api/events/turbo-stream`
 
 Authorization is resolved per request from one of (in priority order):
 1. The `_user` form field (dashboard form actions)
@@ -284,7 +313,18 @@ would carry, and the Service makes its authorization decisions on that.
 |-----------------|--------------|------------------------------------------|
 | `GATEWAY_ADDR`  | `:8080`      | Listen address                           |
 | `GATEWAY_DATA`  | `./data`     | Directory for `ledger.json` persistence  |
-| `GATEWAY_USER`  | `ada`        | Default acting user                      |
+| `GATEWAY_USER`  | `savio`      | Default acting user                      |
+
+When a Fabric CA is available, set these to issue real X.509 certificates:
+
+| Variable               | Default       | Purpose                                       |
+|------------------------|---------------|-----------------------------------------------|
+| `FABRIC_CA_URL`        | —             | CA server URL (e.g. `https://ca.myorg:7054`)  |
+| `FABRIC_CA_NAME`       | `ca`          | CA name                                       |
+| `FABRIC_CA_ADMIN_USER` | `admin`       | Admin enrollment ID                           |
+| `FABRIC_CA_ADMIN_PASS` | —             | Admin enrollment secret                       |
+| `FABRIC_CA_TLS_CERT`   | —             | Path to CA TLS root cert                      |
+| `FABRIC_CA_MSP_DIR`    | `DATA/msp`    | Base directory for enrolled certs             |
 
 ### Curl examples
 
@@ -302,9 +342,51 @@ curl -X POST localhost:8080/api/bills/BILL-123/roles \
   -H 'X-User: felipe' -H 'Content-Type: application/json' \
   -d '{"userId":"carla","role":"VOTER"}'
 
+# Register a participant (requires ADMIN over the granted scopes)
+curl -X POST localhost:8080/api/participants \
+  -H 'X-User: savio' -H 'Content-Type: application/json' \
+  -d '{"id":"carlos","display":"Carlos (citizen)","claims":["OPENDEMOCRACY:COMMUNITY:VOTER","OPENDEMOCRACY:COMMUNITY:PROPOSER"]}'
+
+# Remove a participant
+curl -X DELETE localhost:8080/api/participants/carlos -H 'X-User: savio'
+
 # Subscribe to live events
 curl -N localhost:8080/api/events/stream
 ```
+
+## Federation TUI (`odctl`)
+
+`cmd/odctl` is a terminal UI that replaces manual script execution with a
+guided workflow for bootstrapping and managing federation nodes. Built with
+[bubbletea](https://github.com/charmbracelet/bubbletea), it runs over SSH
+on a VPS.
+
+```
+make odctl && ./bin/odctl
+```
+
+Screens:
+- **Quick Start** — one-key demo launch via `docker compose up`
+- **Setup** — configure organization identity, writes `federation/.env`
+- **Bootstrap** — generate CA and peer TLS certificates via openssl
+- **Start/Stop** — manage federation Docker containers
+- **Participants** — register users with scope claims (persists to CSV)
+
+The TUI auto-detects project state and shows status indicators for each step.
+
+## Federation
+
+The `federation/` directory contains everything needed to run a multi-org
+Hyperledger Fabric network. See `federation/README.md` for the full
+onboarding guide, including adaptation instructions for governments,
+unions, and companies. See `docs/DISTRIBUTED_LEDGER_DESIGN.md` for the
+architectural vision, gap analysis, and cross-chain communication patterns.
+
+Key files:
+- `federation/docker-compose.fabric.yml` — multi-org Fabric network (founders)
+- `federation/docker-compose.node.yml` — single-org node (new members)
+- `federation/scripts/` — bootstrap, onboarding, and deployment automation
+- `federation/config/` — Fabric channel config, crypto, and connection templates
 
 ## Off‑chain Listener (real Fabric only)
 
@@ -367,9 +449,14 @@ Notes:
 - ~~Unit tests for RBAC, scope checks, quorum logic, and events~~ (done — `chaincode/bill/service_test.go`)
 - ~~Web/API layer to drive the chaincode workflows~~ (done — `cmd/gateway` + dashboard)
 - ~~Container build and one-command bring-up~~ (done — `Dockerfile`, `docker-compose.yml`, `Makefile`)
-- Real Hyperledger Fabric network bring-up via `fabric-samples/test-network`, with the gateway pointing at it through a Fabric Gateway client instead of the in-process Service
+- ~~Participant management from the dashboard~~ (done — add/remove with ADMIN auth, on-ledger, event-sourced)
+- ~~Fabric CA integration~~ (done — `FABRIC_CA_URL` env vars, `IdentityProvider` interface, `FabricCAProvider`)
+- ~~Federation infrastructure~~ (done — `federation/` with multi-org Fabric network, onboarding scripts, design doc)
+- ~~Federation TUI~~ (done — `cmd/odctl`, bubbletea, setup/bootstrap/services/participants)
+- Gateway ↔ real Fabric network via Fabric Gateway client (replace in-process Service)
 - Replace the JSON-file Store with bbolt or Postgres for higher write volume
 - Migrate the listener off the end-of-life `fabric-sdk-go` to `fabric-gateway`
 - Real notification channels (e-mail, push) for the listener
-- Certificate-based auth and IPFS pinning integration
-- Governance-driven evolution of roles and criteria masks
+- IPFS pinning integration
+- Cross-network federation relay (Hyperledger Cacti)
+- Quadratic voting and conviction voting mechanisms

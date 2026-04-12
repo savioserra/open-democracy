@@ -1,7 +1,7 @@
 {{define "content"}}
 <div class="mb-6">
   <h2 class="text-xl font-bold">Participants</h2>
-  <p class="text-sm text-gray-400">The directory of identities the gateway can sign as. In a real Fabric deployment each entry corresponds to an X.509 certificate carrying scope claims; here it is seeded in-process for demo use.</p>
+  <p class="text-sm text-gray-400">Directory of identities the gateway can act as. Each entry carries scope claims that determine what the participant can do — propose bills, vote, administer scopes. In a real Fabric deployment these come from X.509 certificates; here they are managed through this page.</p>
 </div>
 
 <div class="overflow-x-auto rounded-lg border border-border">
@@ -11,19 +11,53 @@
         <th class="px-4 py-3 text-left font-semibold">ID</th>
         <th class="px-4 py-3 text-left font-semibold">Display</th>
         <th class="px-4 py-3 text-left font-semibold">Scope claims</th>
+        <th class="px-4 py-3 text-right font-semibold w-20"></th>
       </tr>
     </thead>
     <tbody class="divide-y divide-border">
       {{range .Data}}
-        <tr class="bg-surface transition-colors hover:bg-surface-2">
+        <tr class="bg-surface transition-colors hover:bg-surface-2 group">
           <td class="px-4 py-3"><code class="rounded bg-surface-2 px-1.5 py-0.5 text-xs">{{.ID}}</code></td>
           <td class="px-4 py-3 text-gray-300">{{.Display}}</td>
           <td class="px-4 py-3">
             {{range .Claims}}<code class="mr-1 mb-1 inline-block rounded bg-surface-2 px-1.5 py-0.5 text-xs">{{.}}</code>{{end}}
+          </td>
+          <td class="px-4 py-3 text-right">
+            <form method="post" action="/actions/remove-participant" class="inline" onsubmit="return confirm('Remove participant {{.ID}}?')">
+              <input type="hidden" name="id" value="{{.ID}}">
+              <button type="submit" class="rounded px-2 py-1 text-xs text-gray-500 opacity-0 transition-opacity hover:bg-red-900/30 hover:text-red-400 group-hover:opacity-100" title="Remove {{.ID}}">✕</button>
+            </form>
           </td>
         </tr>
       {{end}}
     </tbody>
   </table>
 </div>
+
+<section class="mt-8 rounded-lg border border-border bg-surface p-6">
+  <h3 class="mb-4 text-lg font-semibold">Add participant</h3>
+  <p class="mb-4 text-sm text-gray-400">
+    Register a new identity with scope claims. The participant will immediately be available
+    in the "Acting as" selector and can create proposals, vote, and delegate within their
+    authorized scopes.
+  </p>
+  <form method="post" action="/actions/add-participant" data-turbo-frame="_top" class="flex flex-wrap items-end gap-3">
+    <label class="flex flex-col gap-1 text-xs text-gray-400">
+      User ID
+      <input name="id" required placeholder="e.g. carlos" class="rounded border border-border bg-surface-2 px-3 py-2 text-sm text-gray-200 outline-none placeholder:text-gray-600 focus:border-blue-500">
+    </label>
+    <label class="flex flex-col gap-1 text-xs text-gray-400">
+      Display name
+      <input name="display" placeholder="e.g. Carlos (citizen)" class="rounded border border-border bg-surface-2 px-3 py-2 text-sm text-gray-200 outline-none placeholder:text-gray-600 focus:border-blue-500">
+    </label>
+    <label class="flex min-w-[300px] flex-1 flex-col gap-1 text-xs text-gray-400">
+      Scope claims
+      <input name="claims" required placeholder="e.g. OPENDEMOCRACY:CORE:VOTER, OPENDEMOCRACY:COMMUNITY:PROPOSER" class="rounded border border-border bg-surface-2 px-3 py-2 text-sm text-gray-200 outline-none placeholder:text-gray-600 focus:border-blue-500">
+      <span class="text-[10px] text-gray-500">Comma-separated. Format: SEG1:SEG2:...:ROLE where ROLE is ADMIN, PROPOSER, EDITOR, VOTER, or AUDITOR</span>
+    </label>
+    <button type="submit" class="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-500">
+      Add participant
+    </button>
+  </form>
+</section>
 {{end}}

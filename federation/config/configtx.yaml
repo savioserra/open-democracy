@@ -1,0 +1,181 @@
+# configtx.yaml — Hyperledger Fabric channel configuration for the
+# open-democracy federation.
+#
+# This template defines a founding consortium of two organizations
+# (adapt by duplicating the Org blocks). The governance channel uses
+# a MAJORITY endorsement policy so no single org can forge state.
+#
+# Usage:
+#   export FABRIC_CFG_PATH=$PWD/federation/config
+#   configtxgen -profile FederationGenesis -outputBlock genesis.block -channelID system-channel
+#   configtxgen -profile GovernanceChannel -outputCreateChannelTx governance.tx -channelID governance
+
+Organizations:
+  - &OrdererOrg
+    Name: OrdererOrg
+    ID: OrdererMSP
+    MSPDir: ../crypto/ordererOrganizations/od.example.com/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('OrdererMSP.member')"
+      Writers:
+        Type: Signature
+        Rule: "OR('OrdererMSP.member')"
+      Admins:
+        Type: Signature
+        Rule: "OR('OrdererMSP.admin')"
+    OrdererEndpoints:
+      - orderer1.od.example.com:7050
+      - orderer2.od.example.com:7050
+      - orderer3.od.example.com:7050
+
+  # --- Founding member: Open Democracy Foundation ---
+  - &OpenDemocracy
+    Name: OpenDemocracyMSP
+    ID: OpenDemocracyMSP
+    MSPDir: ../crypto/peerOrganizations/opendemocracy.od.example.com/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('OpenDemocracyMSP.admin', 'OpenDemocracyMSP.peer', 'OpenDemocracyMSP.client')"
+      Writers:
+        Type: Signature
+        Rule: "OR('OpenDemocracyMSP.admin', 'OpenDemocracyMSP.client')"
+      Admins:
+        Type: Signature
+        Rule: "OR('OpenDemocracyMSP.admin')"
+      Endorsement:
+        Type: Signature
+        Rule: "OR('OpenDemocracyMSP.peer')"
+    AnchorPeers:
+      - Host: peer0.opendemocracy.od.example.com
+        Port: 7051
+
+  # --- Founding member: Example Government ---
+  # Duplicate and rename this block for each new organization.
+  - &ExampleGov
+    Name: ExampleGovMSP
+    ID: ExampleGovMSP
+    MSPDir: ../crypto/peerOrganizations/examplegov.od.example.com/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('ExampleGovMSP.admin', 'ExampleGovMSP.peer', 'ExampleGovMSP.client')"
+      Writers:
+        Type: Signature
+        Rule: "OR('ExampleGovMSP.admin', 'ExampleGovMSP.client')"
+      Admins:
+        Type: Signature
+        Rule: "OR('ExampleGovMSP.admin')"
+      Endorsement:
+        Type: Signature
+        Rule: "OR('ExampleGovMSP.peer')"
+    AnchorPeers:
+      - Host: peer0.examplegov.od.example.com
+        Port: 7051
+
+Capabilities:
+  Channel: &ChannelCapabilities
+    V2_0: true
+  Orderer: &OrdererCapabilities
+    V2_0: true
+  Application: &ApplicationCapabilities
+    V2_0: true
+
+Application: &ApplicationDefaults
+  Organizations:
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+    LifecycleEndorsement:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Endorsement"
+    Endorsement:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Endorsement"
+  Capabilities:
+    <<: *ApplicationCapabilities
+
+Orderer: &OrdererDefaults
+  OrdererType: etcdraft
+  BatchTimeout: 2s
+  BatchSize:
+    MaxMessageCount: 10
+    AbsoluteMaxBytes: 99 MB
+    PreferredMaxBytes: 512 KB
+  EtcdRaft:
+    Consenters:
+      - Host: orderer1.od.example.com
+        Port: 7050
+        ClientTLSCert: ../crypto/ordererOrganizations/od.example.com/orderers/orderer1.od.example.com/tls/server.crt
+        ServerTLSCert: ../crypto/ordererOrganizations/od.example.com/orderers/orderer1.od.example.com/tls/server.crt
+      - Host: orderer2.od.example.com
+        Port: 7050
+        ClientTLSCert: ../crypto/ordererOrganizations/od.example.com/orderers/orderer2.od.example.com/tls/server.crt
+        ServerTLSCert: ../crypto/ordererOrganizations/od.example.com/orderers/orderer2.od.example.com/tls/server.crt
+      - Host: orderer3.od.example.com
+        Port: 7050
+        ClientTLSCert: ../crypto/ordererOrganizations/od.example.com/orderers/orderer3.od.example.com/tls/server.crt
+        ServerTLSCert: ../crypto/ordererOrganizations/od.example.com/orderers/orderer3.od.example.com/tls/server.crt
+  Organizations:
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+    BlockValidation:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+  Capabilities:
+    <<: *OrdererCapabilities
+
+Channel: &ChannelDefaults
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+  Capabilities:
+    <<: *ChannelCapabilities
+
+Profiles:
+  # Genesis block for the ordering service (system channel).
+  FederationGenesis:
+    <<: *ChannelDefaults
+    Orderer:
+      <<: *OrdererDefaults
+      Organizations:
+        - *OrdererOrg
+    Application:
+      <<: *ApplicationDefaults
+      Organizations:
+        - *OpenDemocracy
+        - *ExampleGov
+
+  # Application channel for cross-org governance decisions.
+  GovernanceChannel:
+    <<: *ChannelDefaults
+    Consortium: FederationConsortium
+    Application:
+      <<: *ApplicationDefaults
+      Organizations:
+        - *OpenDemocracy
+        - *ExampleGov

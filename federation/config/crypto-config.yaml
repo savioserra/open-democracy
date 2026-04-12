@@ -1,0 +1,52 @@
+# crypto-config.yaml — Certificate generation template for cryptogen.
+#
+# This generates the MSP (Membership Service Provider) material for each
+# organization in the federation. In production, use Fabric CA instead of
+# cryptogen (Fabric CA supports custom X.509 attributes like "scope").
+#
+# Usage:
+#   cryptogen generate --config=federation/config/crypto-config.yaml --output=federation/crypto
+
+OrdererOrgs:
+  - Name: Orderer
+    Domain: od.example.com
+    EnableNodeOUs: true
+    Specs:
+      - Hostname: orderer1
+        SANS:
+          - localhost
+          - 127.0.0.1
+      - Hostname: orderer2
+        SANS:
+          - localhost
+          - 127.0.0.1
+      - Hostname: orderer3
+        SANS:
+          - localhost
+          - 127.0.0.1
+
+PeerOrgs:
+  # --- Open Democracy Foundation ---
+  - Name: OpenDemocracy
+    Domain: opendemocracy.od.example.com
+    EnableNodeOUs: true
+    Template:
+      Count: 2        # peer0 + peer1
+      SANS:
+        - localhost
+        - 127.0.0.1
+    Users:
+      Count: 5        # Admin + 5 regular users (contributors)
+
+  # --- Example Government ---
+  # Duplicate this block for each new organization joining the federation.
+  - Name: ExampleGov
+    Domain: examplegov.od.example.com
+    EnableNodeOUs: true
+    Template:
+      Count: 1        # single peer for smaller orgs
+      SANS:
+        - localhost
+        - 127.0.0.1
+    Users:
+      Count: 3        # Admin + 3 initial users

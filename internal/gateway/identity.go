@@ -7,6 +7,7 @@ import (
 	"open-democracy/chaincode/bill"
 )
 
+
 // Participant is a known identity that the gateway can act as. It mirrors,
 // in spirit, an X.509 certificate carrying scope claims, but uses pure data
 // because the gateway runs the ledger in-process and does not need TLS auth
@@ -57,6 +58,23 @@ func (r *Registry) Get(id string) (Participant, error) {
 		return Participant{}, errors.New("unknown participant: " + id)
 	}
 	return p, nil
+}
+
+// Remove deletes a participant by id. Returns false if not found.
+func (r *Registry) Remove(id string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.byID[id]; !ok {
+		return false
+	}
+	delete(r.byID, id)
+	for i, oid := range r.ordered {
+		if oid == id {
+			r.ordered = append(r.ordered[:i], r.ordered[i+1:]...)
+			break
+		}
+	}
+	return true
 }
 
 // List returns all participants in insertion order.
