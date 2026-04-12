@@ -21,20 +21,22 @@ var webFS embed.FS
 // Config holds runtime configuration for the gateway. Fields map directly to
 // environment variables read by cmd/gateway/main.go.
 type Config struct {
-	Addr      string // listen address, e.g. :8080
-	StorePath string // path to JSON-backed store file
-	DefaultUser string // default participant id when X-User is missing
+	Addr        string    // listen address, e.g. :8080
+	StorePath   string    // path to JSON-backed store file
+	DefaultUser string    // default participant id when X-User is missing
+	CA          *CAConfig // Fabric CA connection (nil = demo mode)
 }
 
 // Server is the gateway HTTP server. It owns the persisted store, the bill
-// service, the participant registry, and the event broadcaster, and exposes
-// both a REST API and a server-rendered dashboard.
+// service, the participant registry, the event broadcaster, and the identity
+// provider (Fabric CA in production, no-op in demo mode).
 type Server struct {
 	cfg         Config
 	store       *PersistedStore
 	svc         *bill.Service
 	registry    *Registry
 	broadcaster *Broadcaster
+	idProvider  IdentityProvider
 	templates   map[string]*template.Template
 	staticFS    fs.FS
 	mux         *http.ServeMux
@@ -50,7 +52,30 @@ func NewServer(cfg Config) (*Server, error) {
 	}
 	bcast := NewBroadcaster(500)
 	svc := bill.NewService(store, bcast)
+	// Initialize the identity provider (Fabric CA or no-op).
+	var idProvider IdentityProvider = LocalProvider{}
+	if cfg.CA != nil && cfg.CA.Configured() {
+		caProvider, caErr := NewFabricCAProvider(*cfg.CA)
+		if caErr != nil {
+			log.Printf("ca: WARNING: %v — falling back to local-only mode", caErr)
+		} else {
+			idProvider = caProvider
+		}
+	}
+
 	reg := NewRegistry()
+	// Pre-create the server so we can use loadPersistedParticipants before
+	// seeding defaults. This ensures user-added participants survive restarts
+	// and seed only fills in missing defaults.
+	s := &Server{
+		cfg:         cfg,
+		store:       store,
+		svc:         svc,
+		registry:    reg,
+		broadcaster: bcast,
+		idProvider:  idProvider,
+	}
+	s.loadPersistedParticipants()
 	if err := Seed(reg, svc); err != nil {
 		return nil, fmt.Errorf("seed: %w", err)
 	}
@@ -62,16 +87,9 @@ func NewServer(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("static fs: %w", err)
 	}
-	s := &Server{
-		cfg:         cfg,
-		store:       store,
-		svc:         svc,
-		registry:    reg,
-		broadcaster: bcast,
-		templates:   tmpls,
-		staticFS:    staticFS,
-		mux:         http.NewServeMux(),
-	}
+	s.templates = tmpls
+	s.staticFS = staticFS
+	s.mux = http.NewServeMux()
 	s.routes()
 	return s, nil
 }
@@ -100,6 +118,66 @@ func (s *Server) Run(ctx context.Context) error {
 		return nil
 	case err := <-errCh:
 		return err
+	}
+}
+
+// --- participant management --------------------------------------------------
+// Participant operations flow through bill.Service (on-ledger, event-sourced)
+// and optionally through the CA provider (X.509 certificate issuance).
+
+// saveParticipant writes the participant to the ledger via the Service
+// (which enforces ADMIN authorization and emits a ParticipantRegistered
+// event), then registers the identity in the CA if configured, and finally
+// syncs the in-memory registry.
+func (s *Server) saveParticipant(caller *bill.Invoker, p Participant) error {
+	// 1. On-ledger: authorize + store + event.
+	if err := s.svc.RegisterParticipant(caller, time.Now().Unix(), p.ID, p.Display, p.Claims); err != nil {
+		return err
+	}
+	// 2. CA: issue X.509 certificate with scope attributes.
+	if s.idProvider.Available() {
+		if err := s.idProvider.Register(p.ID, p.Display, p.Claims); err != nil {
+			log.Printf("ca: register %s: %v (ledger record created, cert pending)", p.ID, err)
+		}
+	}
+	// 3. In-memory registry for the gateway's identity resolution.
+	s.registry.Add(p)
+	return nil
+}
+
+// removeParticipant marks the participant inactive on the ledger via the
+// Service, revokes the CA certificate if configured, and removes from
+// the in-memory registry.
+func (s *Server) removeParticipant(caller *bill.Invoker, id string) error {
+	// 1. On-ledger: authorize + mark inactive + event.
+	if err := s.svc.RemoveParticipant(caller, time.Now().Unix(), id); err != nil {
+		return err
+	}
+	// 2. CA: revoke certificate.
+	if s.idProvider.Available() {
+		if err := s.idProvider.Revoke(id); err != nil {
+			log.Printf("ca: revoke %s: %v (ledger record removed, cert revocation pending)", id, err)
+		}
+	}
+	// 3. In-memory registry.
+	s.registry.Remove(id)
+	return nil
+}
+
+// loadPersistedParticipants reads participants from the ledger (via the
+// Service) and populates the in-memory registry. Called at startup before
+// seeding defaults.
+func (s *Server) loadPersistedParticipants() {
+	participants, err := s.svc.ListParticipants()
+	if err != nil {
+		return
+	}
+	for _, lp := range participants {
+		s.registry.Add(Participant{
+			ID:      lp.ID,
+			Display: lp.Display,
+			Claims:  lp.Claims,
+		})
 	}
 }
 

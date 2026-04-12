@@ -1,0 +1,67 @@
+# Connection profile template for the open-democracy gateway to connect
+# to a Fabric network. Replace placeholders (${...}) with actual values
+# from your organization's .env and crypto material.
+#
+# The gateway uses this profile to submit transactions to peers and
+# receive events from the ordering service.
+
+name: open-democracy-${ORG_NAME}
+version: "1.0.0"
+client:
+  organization: ${ORG_MSP_ID}
+  connection:
+    timeout:
+      peer:
+        endorser: "300"
+      orderer: "300"
+
+channels:
+  ${CHANNEL_NAME}:
+    orderers:
+      - orderer1.od.example.com
+    peers:
+      peer0.${ORG_DOMAIN}:
+        endorsingPeer: true
+        chaincodeQuery: true
+        ledgerQuery: true
+        eventSource: true
+
+organizations:
+  ${ORG_MSP_ID}:
+    mspid: ${ORG_MSP_ID}
+    peers:
+      - peer0.${ORG_DOMAIN}
+    certificateAuthorities:
+      - ca.${ORG_DOMAIN}
+    # Path to the user's signing certificate and private key.
+    # The gateway resolves the active user per-request; this is the
+    # default SDK identity used for submitting transactions.
+    cryptoPath: /etc/hyperledger/fabric/msp
+
+orderers:
+  orderer1.od.example.com:
+    url: grpcs://orderer1.od.example.com:7050
+    tlsCACerts:
+      path: /etc/hyperledger/fabric/tls/orderer-ca.pem
+    grpcOptions:
+      ssl-target-name-override: orderer1.od.example.com
+      hostnameOverride: orderer1.od.example.com
+
+peers:
+  peer0.${ORG_DOMAIN}:
+    url: grpcs://peer0.${ORG_DOMAIN}:${PEER_PORT}
+    tlsCACerts:
+      path: /etc/hyperledger/fabric/tls/peer-ca.pem
+    grpcOptions:
+      ssl-target-name-override: peer0.${ORG_DOMAIN}
+      hostnameOverride: peer0.${ORG_DOMAIN}
+
+certificateAuthorities:
+  ca.${ORG_DOMAIN}:
+    url: https://ca.${ORG_DOMAIN}:${CA_PORT}
+    tlsCACerts:
+      path: /etc/hyperledger/fabric/tls/ca-cert.pem
+    registrar:
+      enrollId: ${CA_ADMIN_USER}
+      enrollSecret: ${CA_ADMIN_PASS}
+    caName: ca-${ORG_NAME}

@@ -549,3 +549,184 @@ func contains(s []string, target string) bool {
 	}
 	return false
 }
+
+// ── Participant tests ──────────────────────────────────────────────────────
+
+func TestRegisterParticipantRequiresAdmin(t *testing.T) {
+	svc, _ := newTestService()
+	// A voter has no ADMIN authority — cannot register participants.
+	v := voter("v1", "OPENDEMOCRACY:CORE")
+	err := svc.RegisterParticipant(v, 1, "newuser", "New User", []string{"OPENDEMOCRACY:CORE:VOTER"})
+	if err == nil {
+		t.Fatal("expected error: voter should not be able to register participants")
+	}
+	if !strings.Contains(err.Error(), "not authorized") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRegisterParticipantAdminCanGrantInScope(t *testing.T) {
+	svc, sink := newTestService()
+	adm := admin("OPENDEMOCRACY")
+	err := svc.RegisterParticipant(adm, 1, "carlos", "Carlos (citizen)", []string{
+		"OPENDEMOCRACY:CORE:VOTER",
+		"OPENDEMOCRACY:COMMUNITY:PROPOSER",
+	})
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if !contains(sink.names(), "ParticipantRegistered") {
+		t.Fatal("expected ParticipantRegistered event")
+	}
+	// Verify it's in the ledger.
+	p, err := svc.GetParticipant("carlos")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if p.Display != "Carlos (citizen)" {
+		t.Fatalf("display: got %q", p.Display)
+	}
+	if !p.Active {
+		t.Fatal("expected active participant")
+	}
+	if p.CreatedBy != "admin" {
+		t.Fatalf("createdBy: got %q", p.CreatedBy)
+	}
+	if len(p.Claims) != 2 {
+		t.Fatalf("claims: expected 2, got %d", len(p.Claims))
+	}
+}
+
+func TestRegisterParticipantRejectsCrossScope(t *testing.T) {
+	svc, _ := newTestService()
+	// COMMUNITY admin cannot grant CORE claims.
+	communityAdmin := NewInvoker("cadmin", []string{"OPENDEMOCRACY:COMMUNITY:ADMIN"})
+	err := svc.RegisterParticipant(communityAdmin, 1, "eve", "Eve", []string{"OPENDEMOCRACY:CORE:VOTER"})
+	if err == nil {
+		t.Fatal("expected error: community admin should not grant core claims")
+	}
+}
+
+func TestRegisterParticipantRequiresID(t *testing.T) {
+	svc, _ := newTestService()
+	adm := admin("OPENDEMOCRACY")
+	if err := svc.RegisterParticipant(adm, 1, "", "No ID", []string{"OPENDEMOCRACY:VOTER"}); err == nil {
+		t.Fatal("expected error for empty ID")
+	}
+}
+
+func TestRegisterParticipantRequiresClaims(t *testing.T) {
+	svc, _ := newTestService()
+	adm := admin("OPENDEMOCRACY")
+	if err := svc.RegisterParticipant(adm, 1, "empty", "Empty claims", nil); err == nil {
+		t.Fatal("expected error for empty claims")
+	}
+}
+
+func TestRemoveParticipant(t *testing.T) {
+	svc, sink := newTestService()
+	adm := admin("OPENDEMOCRACY")
+	_ = svc.RegisterParticipant(adm, 1, "temp", "Temporary", []string{"OPENDEMOCRACY:CORE:VOTER"})
+
+	err := svc.RemoveParticipant(adm, 2, "temp")
+	if err != nil {
+		t.Fatalf("remove: %v", err)
+	}
+	if !contains(sink.names(), "ParticipantRemoved") {
+		t.Fatal("expected ParticipantRemoved event")
+	}
+	// Participant should still exist but be inactive.
+	p, err := svc.GetParticipant("temp")
+	if err != nil {
+		t.Fatalf("get after remove: %v", err)
+	}
+	if p.Active {
+		t.Fatal("expected inactive after removal")
+	}
+}
+
+func TestRemoveParticipantRejectsCrossScope(t *testing.T) {
+	svc, _ := newTestService()
+	adm := admin("OPENDEMOCRACY")
+	_ = svc.RegisterParticipant(adm, 1, "core_user", "Core User", []string{"OPENDEMOCRACY:CORE:VOTER"})
+
+	// Community admin cannot remove a core participant.
+	communityAdmin := NewInvoker("cadmin", []string{"OPENDEMOCRACY:COMMUNITY:ADMIN"})
+	err := svc.RemoveParticipant(communityAdmin, 2, "core_user")
+	if err == nil {
+		t.Fatal("expected error: community admin cannot remove core participant")
+	}
+}
+
+func TestRemoveParticipantDoubleRemove(t *testing.T) {
+	svc, _ := newTestService()
+	adm := admin("OPENDEMOCRACY")
+	_ = svc.RegisterParticipant(adm, 1, "once", "Once", []string{"OPENDEMOCRACY:VOTER"})
+	_ = svc.RemoveParticipant(adm, 2, "once")
+
+	err := svc.RemoveParticipant(adm, 3, "once")
+	if err == nil {
+		t.Fatal("expected error on double remove")
+	}
+}
+
+func TestRemoveNonexistentParticipant(t *testing.T) {
+	svc, _ := newTestService()
+	adm := admin("OPENDEMOCRACY")
+	err := svc.RemoveParticipant(adm, 1, "ghost")
+	if err == nil {
+		t.Fatal("expected error for nonexistent participant")
+	}
+}
+
+func TestListParticipantsOnlyActive(t *testing.T) {
+	svc, _ := newTestService()
+	adm := admin("OPENDEMOCRACY")
+	_ = svc.RegisterParticipant(adm, 1, "a", "A", []string{"OPENDEMOCRACY:VOTER"})
+	_ = svc.RegisterParticipant(adm, 2, "b", "B", []string{"OPENDEMOCRACY:VOTER"})
+	_ = svc.RegisterParticipant(adm, 3, "c", "C", []string{"OPENDEMOCRACY:VOTER"})
+	_ = svc.RemoveParticipant(adm, 4, "b")
+
+	participants, err := svc.ListParticipants()
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(participants) != 2 {
+		t.Fatalf("expected 2 active, got %d", len(participants))
+	}
+	for _, p := range participants {
+		if p.ID == "b" {
+			t.Fatal("removed participant should not appear in list")
+		}
+	}
+}
+
+func TestScopePortionOfClaim(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"OPENDEMOCRACY:CORE:ADMIN", "OPENDEMOCRACY:CORE"},
+		{"OPENDEMOCRACY:CORE:VOTER", "OPENDEMOCRACY:CORE"},
+		{"OPENDEMOCRACY:COMMUNITY:PROPOSER", "OPENDEMOCRACY:COMMUNITY"},
+		{"GOV:CITY:HEALTH:AUDITOR", "GOV:CITY:HEALTH"},
+		// Scope-only claims (no role suffix) — returned as-is.
+		{"OPENDEMOCRACY:CORE", "OPENDEMOCRACY:CORE"},
+		{"GOV:CITY:HEALTH", "GOV:CITY:HEALTH"},
+		// Single segment that is a role token — returned as-is because
+		// stripping it would leave an empty scope.
+		{"ADMIN", "ADMIN"},
+		// Wildcard scopes.
+		{"GOV:CITY:*", "GOV:CITY:*"},
+		// Mixed case is normalized.
+		{"opendemocracy:core:voter", "OPENDEMOCRACY:CORE"},
+		// Empty string.
+		{"", ""},
+	}
+	for _, tt := range tests {
+		got := scopePortionOfClaim(tt.input)
+		if got != tt.want {
+			t.Errorf("scopePortionOfClaim(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}

@@ -324,8 +324,11 @@ func (s *Service) CastVote(caller *Invoker, now int64, billID, choice string) (s
 // did not vote directly but have a delegation chain leading to a voter have
 // their weight added to that voter's choice. Participants with no vote and
 // no delegation are counted as absent.
-func (s *Service) EndVote(caller *Invoker, now int64, billID string, electorateIDs []string) error {
-	_ = caller
+//
+// Authorization: once the VoteEnd timestamp has elapsed, any caller may
+// finalize the result. This is intentional — it ensures no admin can
+// prevent finalization by withholding the call.
+func (s *Service) EndVote(_ *Invoker, now int64, billID string, electorateIDs []string) error {
 	b, err := s.getBill(billID)
 	if err != nil {
 		return err
@@ -801,6 +804,157 @@ func (s *Service) ListPetitions() ([]*Petition, error) {
 		out = append(out, &p)
 	}
 	return out, nil
+}
+
+// ── Participants (on-ledger identity registry) ──────────────────────────────
+//
+// The identity roster is a governed artifact: who can vote, propose, or
+// administer is the most consequential decision in any governance system.
+// Recording participant lifecycle on-ledger ensures full auditability —
+// every enrollment and removal is visible in the event stream alongside
+// bill votes and delegations.
+
+// RegisterParticipant adds a participant to the on-ledger roster. The caller
+// must hold ADMIN authority covering every scope claim being granted — the
+// same principle as role assignment: you can only give authority you hold.
+func (s *Service) RegisterParticipant(caller *Invoker, now int64, id, displayName string, claims []string) error {
+	if caller == nil {
+		return errors.New("caller is required")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return errors.New("participant id is required")
+	}
+	displayName = strings.TrimSpace(displayName)
+	if len(claims) == 0 {
+		return errors.New("at least one scope claim is required")
+	}
+	// Authorize: caller must have ADMIN over every scope being granted.
+	for _, raw := range claims {
+		scope := scopePortionOfClaim(raw)
+		if !caller.HasAdminFor(scope) {
+			return fmt.Errorf("not authorized: need ADMIN over %s to grant claim %q", scope, raw)
+		}
+	}
+	p := &LedgerParticipant{
+		ID:        id,
+		Display:   displayName,
+		Claims:    claims,
+		CreatedBy: caller.ID,
+		Timestamp: now,
+		Active:    true,
+	}
+	if err := s.putParticipant(p); err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"participantId": id, "display": displayName,
+		"claims": claims, "registeredBy": caller.ID,
+	})
+	_ = s.events.Emit("ParticipantRegistered", payload)
+	return nil
+}
+
+// RemoveParticipant marks a participant as inactive on the ledger. The caller
+// must hold ADMIN authority covering all of the target's scope claims.
+func (s *Service) RemoveParticipant(caller *Invoker, now int64, id string) error {
+	if caller == nil {
+		return errors.New("caller is required")
+	}
+	id = strings.TrimSpace(id)
+	p, err := s.getParticipant(id)
+	if err != nil {
+		return err
+	}
+	if !p.Active {
+		return fmt.Errorf("participant %s is already removed", id)
+	}
+	// Authorize: caller must have ADMIN over the target's scopes.
+	for _, raw := range p.Claims {
+		scope := scopePortionOfClaim(raw)
+		if !caller.HasAdminFor(scope) {
+			return fmt.Errorf("not authorized: need ADMIN over %s to remove participant with claim %q", scope, raw)
+		}
+	}
+	p.Active = false
+	if err := s.putParticipant(p); err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"participantId": id, "removedBy": caller.ID,
+	})
+	_ = s.events.Emit("ParticipantRemoved", payload)
+	return nil
+}
+
+// GetParticipant returns a participant by ID.
+func (s *Service) GetParticipant(id string) (*LedgerParticipant, error) {
+	return s.getParticipant(id)
+}
+
+// ListParticipants returns all active participants on the ledger.
+func (s *Service) ListParticipants() ([]*LedgerParticipant, error) {
+	pairs, err := s.store.ScanByPrefix("PARTICIPANT|")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*LedgerParticipant, 0, len(pairs))
+	for _, kv := range pairs {
+		if len(kv.Value) == 0 {
+			continue
+		}
+		var p LedgerParticipant
+		if err := json.Unmarshal(kv.Value, &p); err != nil {
+			continue
+		}
+		if p.Active {
+			out = append(out, &p)
+		}
+	}
+	return out, nil
+}
+
+func participantKey(id string) string { return "PARTICIPANT|" + id }
+
+func (s *Service) getParticipant(id string) (*LedgerParticipant, error) {
+	if id == "" {
+		return nil, errors.New("participant id is required")
+	}
+	data, err := s.store.Get(participantKey(id))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read participant: %w", err)
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("participant %s does not exist", id)
+	}
+	var p LedgerParticipant
+	if err := json.Unmarshal(data, &p); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal participant: %w", err)
+	}
+	return &p, nil
+}
+
+func (s *Service) putParticipant(p *LedgerParticipant) error {
+	data, err := json.Marshal(p)
+	if err != nil {
+		return fmt.Errorf("failed to marshal participant: %w", err)
+	}
+	return s.store.Put(participantKey(p.ID), data)
+}
+
+// scopePortionOfClaim strips a trailing role token (ADMIN, PROPOSER, etc.)
+// from a claim string and returns just the scope hierarchy.
+func scopePortionOfClaim(claim string) string {
+	claim = normalizeScopePattern(claim)
+	parts := splitScopePath(claim)
+	if len(parts) == 0 {
+		return claim
+	}
+	last := parts[len(parts)-1]
+	if _, ok := authorityRoles[last]; ok && len(parts) > 1 {
+		return strings.Join(parts[:len(parts)-1], ":")
+	}
+	return claim
 }
 
 // internal helpers ----------------------------------------------------------

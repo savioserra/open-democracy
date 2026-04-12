@@ -522,6 +522,54 @@ func (s *Server) handleAPIListParticipants(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, s.registry.List())
 }
 
+type createParticipantRequest struct {
+	ID      string   `json:"id"`
+	Display string   `json:"display"`
+	Claims  []string `json:"claims"`
+}
+
+func (s *Server) handleAPICreateParticipant(w http.ResponseWriter, r *http.Request) {
+	_, caller, err := s.callerFromRequest(r)
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, err)
+		return
+	}
+	var req createParticipantRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	req.ID = strings.TrimSpace(req.ID)
+	if req.ID == "" {
+		writeErr(w, http.StatusBadRequest, errors.New("id is required"))
+		return
+	}
+	if len(req.Claims) == 0 {
+		writeErr(w, http.StatusBadRequest, errors.New("at least one scope claim is required"))
+		return
+	}
+	p := Participant{ID: req.ID, Display: req.Display, Claims: req.Claims}
+	if err := s.saveParticipant(caller, p); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, p)
+}
+
+func (s *Server) handleAPIDeleteParticipant(w http.ResponseWriter, r *http.Request) {
+	_, caller, err := s.callerFromRequest(r)
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, err)
+		return
+	}
+	id := r.PathValue("id")
+	if err := s.removeParticipant(caller, id); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // Entity is a top-level scope segment with the participants and bills under
 // it. The dashboard groups federated state this way to give an at-a-glance
 // view of the polity.

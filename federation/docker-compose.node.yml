@@ -1,0 +1,153 @@
+# docker-compose.node.yml — Minimal container stack for a new organization
+# joining the open-democracy federation.
+#
+# This is what a government, union, or company runs to become a node.
+# It brings up 3 containers (4 with CouchDB):
+#   - Fabric peer       — stores the ledger, runs chaincode
+#   - Fabric CA         — issues X.509 certificates with scope attributes
+#   - Open Democracy    — dashboard + REST API for human interaction
+#   - CouchDB (opt.)    — rich queries on ledger state
+#
+# Before starting:
+#   1. Copy config/org-template.env to .env and edit it
+#   2. Generate crypto material: ./scripts/bootstrap-node.sh
+#   3. Get approved by the federation (existing members vote you in)
+#   4. Start:  docker compose -f docker-compose.node.yml up -d
+#   5. Join:   ./scripts/join-network.sh
+#
+# The peer will sync the full ledger from the ordering service and the
+# gateway will serve the dashboard with all cross-org proposals visible.
+
+services:
+
+  # ── Fabric Peer ──────────────────────────────────────────────────────
+  # Stores the blockchain ledger and executes chaincode (smart contracts).
+  # Each organization runs at least one peer.
+  peer:
+    image: hyperledger/fabric-peer:2.5
+    container_name: peer0.${ORG_DOMAIN:-myorg.od.example.com}
+    environment:
+      FABRIC_LOGGING_SPEC: INFO
+      CORE_PEER_ID: peer0.${ORG_DOMAIN:-myorg.od.example.com}
+      CORE_PEER_ADDRESS: peer0.${ORG_DOMAIN:-myorg.od.example.com}:${PEER_PORT:-7051}
+      CORE_PEER_LISTENADDRESS: 0.0.0.0:${PEER_PORT:-7051}
+      CORE_PEER_CHAINCODEADDRESS: peer0.${ORG_DOMAIN:-myorg.od.example.com}:7052
+      CORE_PEER_CHAINCODELISTENADDRESS: 0.0.0.0:7052
+      CORE_PEER_GOSSIP_EXTERNALENDPOINT: peer0.${ORG_DOMAIN:-myorg.od.example.com}:${PEER_PORT:-7051}
+      CORE_PEER_LOCALMSPID: ${ORG_MSP_ID:-MyOrgMSP}
+      CORE_PEER_TLS_ENABLED: "true"
+      CORE_PEER_TLS_CERT_FILE: /etc/hyperledger/fabric/tls/server.crt
+      CORE_PEER_TLS_KEY_FILE: /etc/hyperledger/fabric/tls/server.key
+      CORE_PEER_TLS_ROOTCERT_FILE: /etc/hyperledger/fabric/tls/ca.crt
+      CORE_PEER_MSPCONFIGPATH: /etc/hyperledger/fabric/msp
+      # CouchDB (when USE_COUCHDB=true)
+      CORE_LEDGER_STATE_STATEDATABASE: ${USE_COUCHDB:+CouchDB}
+      CORE_LEDGER_STATE_COUCHDBCONFIG_COUCHDBADDRESS: ${USE_COUCHDB:+couchdb:5984}
+      CORE_LEDGER_STATE_COUCHDBCONFIG_USERNAME: ${COUCHDB_USER:-admin}
+      CORE_LEDGER_STATE_COUCHDBCONFIG_PASSWORD: ${COUCHDB_PASS:-adminpw}
+    volumes:
+      - ./crypto/peers/peer0/msp:/etc/hyperledger/fabric/msp
+      - ./crypto/peers/peer0/tls:/etc/hyperledger/fabric/tls
+      - peer-data:/var/hyperledger/production
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "${PEER_PORT:-7051}:${PEER_PORT:-7051}"
+    networks:
+      - od-node-network
+    restart: unless-stopped
+
+  # ── Fabric Certificate Authority ─────────────────────────────────────
+  # Issues X.509 certificates with scope attributes for participants.
+  # Example: a government CA issues certs with scope=GOV:CITY:HEALTH:VOTER
+  ca:
+    image: hyperledger/fabric-ca:1.5
+    container_name: ca.${ORG_DOMAIN:-myorg.od.example.com}
+    environment:
+      FABRIC_CA_HOME: /etc/hyperledger/fabric-ca-server
+      FABRIC_CA_SERVER_CA_NAME: ca-${ORG_NAME:-myorg}
+      FABRIC_CA_SERVER_TLS_ENABLED: "true"
+      FABRIC_CA_SERVER_PORT: "${CA_PORT:-7054}"
+      FABRIC_CA_SERVER_OPERATIONS_LISTENADDRESS: 0.0.0.0:9443
+    ports:
+      - "${CA_PORT:-7054}:${CA_PORT:-7054}"
+      - "9443:9443"
+    volumes:
+      - ./crypto/ca:/etc/hyperledger/fabric-ca-server
+    networks:
+      - od-node-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "fabric-ca-client", "getcainfo", "-u", "https://localhost:${CA_PORT:-7054}", "--tls.certfiles", "/etc/hyperledger/fabric-ca-server/tls-cert.pem"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ── Open Democracy Gateway ───────────────────────────────────────────
+  # REST API + HTML dashboard. Currently runs in demo mode (in-process
+  # Service with JSON persistence). When the Fabric Gateway client is
+  # wired up, it will submit transactions to the peer instead.
+  gateway:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: open-democracy-gateway:latest
+    container_name: gateway.${ORG_NAME:-myorg}
+    environment:
+      GATEWAY_ADDR: ":${GATEWAY_PORT:-8080}"
+      GATEWAY_DATA: "/data"
+      GATEWAY_USER: "${GATEWAY_DEFAULT_USER:-admin}"
+      # Fabric CA integration — when set, participants added through the
+      # dashboard are registered in the CA with X.509 scope attributes.
+      FABRIC_CA_URL: "https://ca.${ORG_DOMAIN:-myorg.od.example.com}:${CA_PORT:-7054}"
+      FABRIC_CA_NAME: "ca-${ORG_NAME:-myorg}"
+      FABRIC_CA_ADMIN_USER: "${CA_ADMIN_USER:-admin}"
+      FABRIC_CA_ADMIN_PASS: "${CA_ADMIN_PASS:-adminpw}"
+      FABRIC_CA_TLS_CERT: "/etc/hyperledger/fabric/tls/ca-cert.pem"
+      FABRIC_CA_MSP_DIR: "/data/msp"
+    volumes:
+      - gateway-data:/data
+      - ./crypto/ca/ca-cert.pem:/etc/hyperledger/fabric/tls/ca-cert.pem:ro
+    ports:
+      - "${GATEWAY_PORT:-8080}:${GATEWAY_PORT:-8080}"
+    networks:
+      - od-node-network
+    depends_on:
+      - peer
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/app/gateway", "-healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+
+  # ── CouchDB (optional) ──────────────────────────────────────────────
+  # Rich query support for the peer's state database. Enable by setting
+  # USE_COUCHDB=true in your .env file. Not required for basic operation.
+  couchdb:
+    image: couchdb:3.3
+    container_name: couchdb.${ORG_NAME:-myorg}
+    environment:
+      COUCHDB_USER: ${COUCHDB_USER:-admin}
+      COUCHDB_PASSWORD: ${COUCHDB_PASS:-adminpw}
+    ports:
+      - "${COUCHDB_PORT:-5984}:5984"
+    volumes:
+      - couchdb-data:/opt/couchdb/data
+    networks:
+      - od-node-network
+    restart: unless-stopped
+    profiles:
+      - couchdb
+
+networks:
+  od-node-network:
+    name: od-node-${ORG_NAME:-myorg}
+
+volumes:
+  peer-data:
+    name: od-peer-${ORG_NAME:-myorg}
+  gateway-data:
+    name: od-gateway-${ORG_NAME:-myorg}
+  couchdb-data:
+    name: od-couchdb-${ORG_NAME:-myorg}

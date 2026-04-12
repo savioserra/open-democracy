@@ -1,0 +1,12 @@
+# Generated crypto material (contains private keys — never commit).
+crypto/
+channel-artifacts/
+
+# Organization-specific environment (contains CA passwords).
+.env
+
+# Generated connection profiles.
+connection-profile.yaml
+
+# Fabric CA server state.
+fabric-ca-server/

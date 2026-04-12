@@ -3,6 +3,7 @@ package gateway
 import (
 	"errors"
 	"fmt"
+	"log"
 	"strconv"
 	"time"
 
@@ -30,7 +31,20 @@ import (
 //	│  └─ voters     (frank, grace)                  → community members vote
 //	└─ root admin    (savio, scope OPENDEMOCRACY)    → can act across all scopes
 func Seed(reg *Registry, svc *bill.Service) error {
+	// Register default participants. Skip any that already exist in the
+	// registry (loaded from the ledger by loadPersistedParticipants) so
+	// user modifications are never silently overwritten by seed data.
+	seedAdmin := bill.NewInvoker("_seed", []string{"OPENDEMOCRACY:ADMIN"})
+	now := time.Now().Unix()
 	for _, p := range defaultParticipants() {
+		if _, err := reg.Get(p.ID); err == nil {
+			continue // already loaded from ledger — don't overwrite
+		}
+		// Write to ledger so seed participants are on-ledger like
+		// dashboard-added ones (auditable, event-sourced).
+		if err := svc.RegisterParticipant(seedAdmin, now, p.ID, p.Display, p.Claims); err != nil {
+			log.Printf("seed: register participant %s: %v", p.ID, err)
+		}
 		reg.Add(p)
 	}
 	bills, err := svc.ListBills()
@@ -97,7 +111,6 @@ func seedSampleBills(reg *Registry, svc *bill.Service) error {
 	// CORE scope covers: savio, alice, bob, carol, dave, eve = 6
 	// COMMUNITY scope covers: alice, frank, grace = 3 (alice has both)
 	coreElectorate := 6
-	communityElectorate := 3
 
 	// ── PROP-001: Architecture decision — extract Service layer ──────
 	//
@@ -269,7 +282,6 @@ func seedSampleBills(reg *Registry, svc *bill.Service) error {
 		return fmt.Errorf("seed delegation dave→carol: %w", err)
 	}
 
-	_ = communityElectorate
 	return nil
 }
 
