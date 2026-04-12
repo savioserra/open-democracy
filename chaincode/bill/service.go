@@ -1,6 +1,8 @@
 package bill
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -146,30 +148,35 @@ func (s *Service) AssignRoleForBill(caller *Invoker, billID, userID, role string
 }
 
 // VoteOnVersion records a vote for a specific draft version and updates the
-// agreement state when criteria/quorum are met.
-func (s *Service) VoteOnVersion(caller *Invoker, now int64, billID, versionIndex, choice string) error {
+// agreement state when criteria/quorum are met. Authorization is scope-based:
+// if the caller is in scope, they can vote. No explicit VOTER role required.
+//
+// electorate is the total number of in-scope participants at this moment,
+// used to compute quorum and ABSENCE. The gateway resolves this from the
+// participant registry; a Fabric deployment would resolve it from the MSP.
+//
+// Returns the one-time vote receipt ID. The caller must save it — the system
+// will never display it again.
+func (s *Service) VoteOnVersion(caller *Invoker, now int64, billID, versionIndex, choice string, electorate int) (string, error) {
 	b, err := s.getBill(billID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if b.Status != StatusDraft {
-		return errors.New("bill must be in draft status to vote on a version")
+		return "", errors.New("bill must be in draft status to vote on a version")
 	}
 	if b.AgreedVersionIndex >= 0 {
-		return errors.New("a version has already reached quorum agreement for this bill")
+		return "", errors.New("a version has already reached quorum agreement for this bill")
 	}
 	idx, err := strconv.Atoi(strings.TrimSpace(versionIndex))
 	if err != nil {
-		return fmt.Errorf("invalid versionIndex: %v", err)
+		return "", fmt.Errorf("invalid versionIndex: %v", err)
 	}
 	if idx < 0 || idx >= len(b.Versions) {
-		return fmt.Errorf("versionIndex out of range: %d", idx)
-	}
-	if !caller.HasRole(b, RoleVoter) {
-		return errors.New("not authorized: requires VOTER role for this bill")
+		return "", fmt.Errorf("versionIndex out of range: %d", idx)
 	}
 	if !caller.InScope(b.Scope) {
-		return errors.New("scope not allowed for this bill")
+		return "", errors.New("scope not allowed for this bill")
 	}
 	for i := range b.Versions {
 		if b.Versions[i].Votes == nil {
@@ -178,15 +185,24 @@ func (s *Service) VoteOnVersion(caller *Invoker, now int64, billID, versionIndex
 	}
 	ch, err := ParseChoiceToken(choice)
 	if err != nil {
-		return fmt.Errorf("invalid choice: %v", err)
+		return "", fmt.Errorf("invalid choice: %v", err)
 	}
 	if ch == ChoiceAbsence || ch == ChoiceNone {
-		return errors.New("invalid choice (expected YES, NO, or ABSTAIN)")
+		return "", errors.New("invalid choice (expected YES, NO, or ABSTAIN)")
 	}
 	b.Versions[idx].Votes[caller.ID] = Vote{VoterID: caller.ID, Choice: ch, Timestamp: now}
 
-	yes, no, abstain, absence, eligible := tallyVotes(b, b.Versions[idx].Votes)
-	participation, _, _ := computeParticipation(b, yes, no, abstain, absence, eligible)
+	// Generate receipt
+	voteID, err := generateVoteID()
+	if err != nil {
+		return "", fmt.Errorf("generate vote ID: %w", err)
+	}
+	if err := s.storeReceipt(VoteReceipt{VoteID: voteID, BillID: billID, Choice: ch, Timestamp: now}); err != nil {
+		return "", err
+	}
+
+	yes, no, abstain, absence := tallyVoteCounts(b.Versions[idx].Votes, electorate)
+	participation, _, _ := computeParticipation(b, yes, no, abstain, absence, electorate)
 	if participation >= b.Quorum {
 		execCount := countByMask(b.Criteria.ExecuteMask, yes, no, abstain, absence)
 		rejCount := countByMask(b.Criteria.RejectMask, yes, no, abstain, absence)
@@ -195,7 +211,7 @@ func (s *Service) VoteOnVersion(caller *Invoker, now int64, billID, versionIndex
 		}
 	}
 	if err := s.putBill(b); err != nil {
-		return err
+		return "", err
 	}
 	payload, _ := json.Marshal(map[string]any{
 		"billId":        billID,
@@ -204,7 +220,7 @@ func (s *Service) VoteOnVersion(caller *Invoker, now int64, billID, versionIndex
 		"no":            no,
 		"abstain":       abstain,
 		"absence":       absence,
-		"eligible":      eligible,
+		"eligible":      electorate,
 		"participation": participation,
 	})
 	_ = s.events.Emit("VersionVoteAdded", payload)
@@ -212,11 +228,12 @@ func (s *Service) VoteOnVersion(caller *Invoker, now int64, billID, versionIndex
 		payload2, _ := json.Marshal(map[string]any{"billId": billID, "versionIndex": idx})
 		_ = s.events.Emit("VersionAgreed", payload2)
 	}
-	return nil
+	return voteID, nil
 }
 
 // SubmitBill opens the formal voting window on the agreed version.
-func (s *Service) SubmitBill(caller *Invoker, billID, startTimeSeconds, durationSeconds string) error {
+// electorate is the current in-scope participant count for re-verifying quorum.
+func (s *Service) SubmitBill(caller *Invoker, billID, startTimeSeconds, durationSeconds string, electorate int) error {
 	b, err := s.getBill(billID)
 	if err != nil {
 		return err
@@ -231,8 +248,8 @@ func (s *Service) SubmitBill(caller *Invoker, billID, startTimeSeconds, duration
 	if idx < 0 || idx >= len(b.Versions) {
 		return errors.New("no version has reached quorum agreement")
 	}
-	yes, no, abstain, absence, eligible := tallyVotes(b, b.Versions[idx].Votes)
-	participation, _, _ := computeParticipation(b, yes, no, abstain, absence, eligible)
+	yes, no, abstain, absence := tallyVoteCounts(b.Versions[idx].Votes, electorate)
+	participation, _, _ := computeParticipation(b, yes, no, abstain, absence, electorate)
 	if participation < b.Quorum {
 		return errors.New("agreed version quorum not met")
 	}
@@ -255,43 +272,55 @@ func (s *Service) SubmitBill(caller *Invoker, billID, startTimeSeconds, duration
 	return nil
 }
 
-// CastVote records a vote during the open voting window.
-func (s *Service) CastVote(caller *Invoker, now int64, billID, choice string) error {
+// CastVote records a vote during the open voting window. Authorization is
+// scope-based — no VOTER role required. Returns the one-time vote receipt ID.
+func (s *Service) CastVote(caller *Invoker, now int64, billID, choice string) (string, error) {
 	b, err := s.getBill(billID)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if b.Status != StatusVoting {
-		return errors.New("voting is not open")
+		return "", errors.New("voting is not open")
 	}
 	if now < b.VoteStart || now > b.VoteEnd {
-		return errors.New("outside voting window")
-	}
-	if !caller.HasRole(b, RoleVoter) {
-		return errors.New("not authorized: missing VOTER role for this bill")
+		return "", errors.New("outside voting window")
 	}
 	if !caller.InScope(b.Scope) {
-		return errors.New("scope not allowed for this bill")
+		return "", errors.New("scope not allowed for this bill")
 	}
 	if b.Votes == nil {
 		b.Votes = map[string]Vote{}
 	}
 	if _, exists := b.Votes[caller.ID]; exists {
-		return errors.New("user has already voted")
+		return "", errors.New("user has already voted")
 	}
 	ch, err := ParseChoiceToken(choice)
 	if err != nil {
-		return fmt.Errorf("invalid choice: %v", err)
+		return "", fmt.Errorf("invalid choice: %v", err)
 	}
 	if ch == ChoiceAbsence || ch == ChoiceNone {
-		return errors.New("invalid choice (expected YES, NO, or ABSTAIN)")
+		return "", errors.New("invalid choice (expected YES, NO, or ABSTAIN)")
 	}
 	b.Votes[caller.ID] = Vote{VoterID: caller.ID, Choice: ch, Timestamp: now}
-	return s.putBill(b)
+
+	voteID, err := generateVoteID()
+	if err != nil {
+		return "", fmt.Errorf("generate vote ID: %w", err)
+	}
+	if err := s.storeReceipt(VoteReceipt{VoteID: voteID, BillID: billID, Choice: ch, Timestamp: now}); err != nil {
+		return "", err
+	}
+	if err := s.putBill(b); err != nil {
+		return "", err
+	}
+	return voteID, nil
 }
 
 // EndVote finalizes the vote, computes the outcome, and transitions status.
-func (s *Service) EndVote(caller *Invoker, now int64, billID string) error {
+// electorate is the in-scope participant count at close time — this is the
+// denominator for quorum and the source of ABSENCE. The gateway resolves it
+// from the registry; a Fabric deployment would resolve it from the MSP.
+func (s *Service) EndVote(caller *Invoker, now int64, billID string, electorate int) error {
 	_ = caller // anyone may attempt to end the vote; the time check enforces correctness
 	b, err := s.getBill(billID)
 	if err != nil {
@@ -303,8 +332,8 @@ func (s *Service) EndVote(caller *Invoker, now int64, billID string) error {
 	if now < b.VoteEnd {
 		return errors.New("voting period has not ended yet")
 	}
-	yes, no, abstain, absence, eligible := tallyVotes(b, b.Votes)
-	participation, executeCount, rejectCount := computeParticipation(b, yes, no, abstain, absence, eligible)
+	yes, no, abstain, absence := tallyVoteCounts(b.Votes, electorate)
+	participation, executeCount, rejectCount := computeParticipation(b, yes, no, abstain, absence, electorate)
 
 	if participation < b.Quorum {
 		b.Status = StatusRejected
@@ -323,7 +352,7 @@ func (s *Service) EndVote(caller *Invoker, now int64, billID string) error {
 		"no":            no,
 		"abstain":       abstain,
 		"absence":       absence,
-		"eligible":      eligible,
+		"eligible":      electorate,
 		"participation": participation,
 		"executeCount":  executeCount,
 		"rejectCount":   rejectCount,
@@ -705,14 +734,30 @@ func normalizeAndAuthorizeCreateScope(caller *Invoker, scope string) (string, er
 	return s, nil
 }
 
-// tallyVotes counts the YES/NO/ABSTAIN votes from a votes map and derives
-// ABSENCE from the eligible voter count.
-func tallyVotes(b *Bill, votes map[string]Vote) (yes, no, abstain, absence, eligible int) {
-	for _, rs := range b.Roles {
-		if rs.Has(RoleVoter) {
-			eligible++
-		}
+// VerifyVote looks up a vote receipt by its one-time ID. Returns the receipt
+// (choice, bill, timestamp) without any voter identity. Returns an error if
+// the receipt does not exist.
+func (s *Service) VerifyVote(voteID string) (*VoteReceipt, error) {
+	if voteID == "" {
+		return nil, errors.New("voteID is required")
 	}
+	data, err := s.store.Get(receiptKey(voteID))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		return nil, fmt.Errorf("vote receipt %s not found", voteID)
+	}
+	var r VoteReceipt
+	if err := json.Unmarshal(data, &r); err != nil {
+		return nil, err
+	}
+	return &r, nil
+}
+
+// tallyVoteCounts counts YES/NO/ABSTAIN from a votes map and derives ABSENCE
+// from the electorate count (total in-scope participants).
+func tallyVoteCounts(votes map[string]Vote, electorate int) (yes, no, abstain, absence int) {
 	for _, v := range votes {
 		switch v.Choice {
 		case ChoiceYes:
@@ -723,15 +768,12 @@ func tallyVotes(b *Bill, votes map[string]Vote) (yes, no, abstain, absence, elig
 			abstain++
 		}
 	}
-	if eligible > 0 {
+	if electorate > 0 {
 		cast := yes + no + abstain
-		if cast > eligible {
-			cast = eligible
+		if cast > electorate {
+			cast = electorate
 		}
-		if cast < 0 {
-			cast = 0
-		}
-		absence = eligible - cast
+		absence = electorate - cast
 	}
 	return
 }
@@ -763,7 +805,26 @@ func computeParticipation(b *Bill, yes, no, abstain, absence, eligible int) (par
 	return
 }
 
-func billKey(id string) string { return "BILL|" + id }
+func billKey(id string) string    { return "BILL|" + id }
+func receiptKey(id string) string { return "RECEIPT|" + id }
+
+// generateVoteID returns 16 random hex bytes (32 chars). Crypto/rand is
+// available in both the gateway and the Fabric chaincode environment.
+func generateVoteID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+func (s *Service) storeReceipt(r VoteReceipt) error {
+	data, err := json.Marshal(r)
+	if err != nil {
+		return err
+	}
+	return s.store.Put(receiptKey(r.VoteID), data)
+}
 
 // parseRoleExpr parses expressions like "VOTER|PROPOSER" or "voter, editor".
 func parseRoleExpr(expr string) (Role, error) {

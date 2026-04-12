@@ -246,11 +246,13 @@ func (s *Server) handleAPIVersionVote(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.svc.VoteOnVersion(caller, time.Now().Unix(), r.PathValue("id"), r.PathValue("idx"), req.Choice); err != nil {
+	electorate := s.electorateForBill(r.PathValue("id"))
+	voteID, err := s.svc.VoteOnVersion(caller, time.Now().Unix(), r.PathValue("id"), r.PathValue("idx"), req.Choice, electorate)
+	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, http.StatusOK, map[string]string{"voteId": voteID})
 }
 
 type submitBillRequest struct {
@@ -272,7 +274,8 @@ func (s *Server) handleAPISubmit(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(req.StartTimeSeconds) == "" {
 		req.StartTimeSeconds = strconv.FormatInt(time.Now().Unix(), 10)
 	}
-	if err := s.svc.SubmitBill(caller, r.PathValue("id"), req.StartTimeSeconds, req.DurationSeconds); err != nil {
+	electorate := s.electorateForBill(r.PathValue("id"))
+	if err := s.svc.SubmitBill(caller, r.PathValue("id"), req.StartTimeSeconds, req.DurationSeconds, electorate); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
@@ -290,11 +293,12 @@ func (s *Server) handleAPICastVote(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.svc.CastVote(caller, time.Now().Unix(), r.PathValue("id"), req.Choice); err != nil {
+	voteID, err := s.svc.CastVote(caller, time.Now().Unix(), r.PathValue("id"), req.Choice)
+	if err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, http.StatusOK, map[string]string{"voteId": voteID})
 }
 
 func (s *Server) handleAPIEndVote(w http.ResponseWriter, r *http.Request) {
@@ -303,7 +307,8 @@ func (s *Server) handleAPIEndVote(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, err)
 		return
 	}
-	if err := s.svc.EndVote(caller, time.Now().Unix(), r.PathValue("id")); err != nil {
+	electorate := s.electorateForBill(r.PathValue("id"))
+	if err := s.svc.EndVote(caller, time.Now().Unix(), r.PathValue("id"), electorate); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
@@ -435,6 +440,22 @@ func (s *Server) eligibleVotersForScope(petitionID string) []string {
 		}
 	}
 	return out
+}
+
+// Vote verification ---------------------------------------------------------
+
+func (s *Server) handleAPIVerifyVote(w http.ResponseWriter, r *http.Request) {
+	receipt, err := s.svc.VerifyVote(r.PathValue("voteId"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"voteId":    receipt.VoteID,
+		"billId":    receipt.BillID,
+		"choice":    choiceName(receipt.Choice),
+		"timestamp": receipt.Timestamp,
+	})
 }
 
 // Participants & entities ---------------------------------------------------

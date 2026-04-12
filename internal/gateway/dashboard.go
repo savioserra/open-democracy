@@ -22,6 +22,7 @@ type pageData struct {
 	AsUser   string
 	Flash    string
 	FlashErr string
+	Receipt  string // one-time vote receipt ID, shown exactly once
 	Data     any
 }
 
@@ -39,6 +40,9 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, name string, dat
 	}
 	if data.FlashErr == "" {
 		data.FlashErr = r.URL.Query().Get("err")
+	}
+	if data.Receipt == "" {
+		data.Receipt = r.URL.Query().Get("receipt")
 	}
 	tmpl, ok := s.templates[name]
 	if !ok {
@@ -199,6 +203,17 @@ func (s *Server) callerForForm(r *http.Request) (Participant, *bill.Invoker, err
 	return s.callerFromRequest(r)
 }
 
+// redirectWithReceipt redirects with the one-time vote receipt ID in the
+// flash message. This is the only time the system shows the vote ID.
+func (s *Server) redirectWithReceipt(w http.ResponseWriter, r *http.Request, target string, voteID string) {
+	q := url.Values{}
+	q.Set("receipt", voteID)
+	if as := r.FormValue("_user"); as != "" {
+		q.Set("as", as)
+	}
+	http.Redirect(w, r, target+"?"+q.Encode(), http.StatusSeeOther)
+}
+
 func (s *Server) redirectAfterAction(w http.ResponseWriter, r *http.Request, target string, err error) {
 	q := url.Values{}
 	if err != nil {
@@ -286,8 +301,13 @@ func (s *Server) handleFormVersionVote(w http.ResponseWriter, r *http.Request) {
 		s.redirectAfterAction(w, r, "/bills/"+id, err)
 		return
 	}
-	err = s.svc.VoteOnVersion(caller, time.Now().Unix(), id, r.FormValue("versionIndex"), r.FormValue("choice"))
-	s.redirectAfterAction(w, r, "/bills/"+id, err)
+	electorate := s.electorateForBill(id)
+	voteID, voteErr := s.svc.VoteOnVersion(caller, time.Now().Unix(), id, r.FormValue("versionIndex"), r.FormValue("choice"), electorate)
+	if voteErr != nil {
+		s.redirectAfterAction(w, r, "/bills/"+id, voteErr)
+		return
+	}
+	s.redirectWithReceipt(w, r, "/bills/"+id, voteID)
 }
 
 func (s *Server) handleFormSubmitBill(w http.ResponseWriter, r *http.Request) {
@@ -305,7 +325,8 @@ func (s *Server) handleFormSubmitBill(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(start) == "" {
 		start = fmt.Sprintf("%d", time.Now().Unix())
 	}
-	err = s.svc.SubmitBill(caller, id, start, r.FormValue("duration"))
+	electorate := s.electorateForBill(id)
+	err = s.svc.SubmitBill(caller, id, start, r.FormValue("duration"), electorate)
 	s.redirectAfterAction(w, r, "/bills/"+id, err)
 }
 
@@ -320,8 +341,12 @@ func (s *Server) handleFormCastVote(w http.ResponseWriter, r *http.Request) {
 		s.redirectAfterAction(w, r, "/bills/"+id, err)
 		return
 	}
-	err = s.svc.CastVote(caller, time.Now().Unix(), id, r.FormValue("choice"))
-	s.redirectAfterAction(w, r, "/bills/"+id, err)
+	voteID, voteErr := s.svc.CastVote(caller, time.Now().Unix(), id, r.FormValue("choice"))
+	if voteErr != nil {
+		s.redirectAfterAction(w, r, "/bills/"+id, voteErr)
+		return
+	}
+	s.redirectWithReceipt(w, r, "/bills/"+id, voteID)
 }
 
 func (s *Server) handleFormEndVote(w http.ResponseWriter, r *http.Request) {
@@ -335,7 +360,8 @@ func (s *Server) handleFormEndVote(w http.ResponseWriter, r *http.Request) {
 		s.redirectAfterAction(w, r, "/bills/"+id, err)
 		return
 	}
-	err = s.svc.EndVote(caller, time.Now().Unix(), id)
+	electorate := s.electorateForBill(id)
+	err = s.svc.EndVote(caller, time.Now().Unix(), id, electorate)
 	s.redirectAfterAction(w, r, "/bills/"+id, err)
 }
 

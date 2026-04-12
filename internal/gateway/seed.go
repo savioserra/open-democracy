@@ -93,12 +93,19 @@ func seedSampleBills(reg *Registry, svc *bill.Service) error {
 	dave, _ := reg.Get("dave")
 	frank, _ := reg.Get("frank")
 
+	// Electorate counts (resolved from the registry by scope).
+	// CORE scope covers: savio, alice, bob, carol, dave, eve = 6
+	// COMMUNITY scope covers: alice, frank, grace = 3 (alice has both)
+	coreElectorate := 6
+	communityElectorate := 3
+
 	// ── PROP-001: Architecture decision — extract Service layer ──────
 	//
 	// This mirrors the actual refactoring that was done in this repo:
 	// separating chaincode business logic into a pure-Go Service so the
 	// same rules run both inside Fabric and in the gateway. Already
 	// agreed and executed — demonstrates a completed governance cycle.
+	// No VOTER role assignment — everyone in CORE scope can vote.
 	if err := svc.CreateBill(alice.Invoker(), now-3600, "PROP-001",
 		"QmServiceLayerRefactor2024",
 		"Extract chaincode business logic into a reusable Service layer decoupled from Fabric stub interfaces",
@@ -108,24 +115,18 @@ func seedSampleBills(reg *Registry, svc *bill.Service) error {
 	); err != nil {
 		return fmt.Errorf("seed PROP-001: %w", err)
 	}
-	// Assign all core members as voters
-	for _, vid := range []string{"alice", "bob", "carol", "dave", "eve"} {
-		if err := svc.AssignRoleForBill(savio.Invoker(), "PROP-001", vid, "VOTER"); err != nil {
-			return fmt.Errorf("seed assign %s to PROP-001: %w", vid, err)
-		}
-	}
+	// Bob gets EDITOR role so he can refine the proposal text.
 	if err := svc.AssignRoleForBill(savio.Invoker(), "PROP-001", "bob", "EDITOR"); err != nil {
 		return fmt.Errorf("seed assign bob editor PROP-001: %w", err)
 	}
-	// Bob edits: adds implementation details
 	if err := svc.EditBill(bob.Invoker(), now-3500, "PROP-001",
 		"QmServiceLayerRefactorV2",
 		"v2: adds Store/EventSink interfaces and MemStore for gateway + tests",
 	); err != nil {
 		return fmt.Errorf("seed PROP-001 edit: %w", err)
 	}
-	// Core team votes on version 1 (the refined one). 3 of 5 is enough for
-	// 50% quorum — the version is agreed after the third YES.
+	// Core team votes on version 1. Anyone in scope can vote — no
+	// VOTER assignment needed.
 	for _, v := range []struct {
 		id     string
 		choice string
@@ -133,13 +134,13 @@ func seedSampleBills(reg *Registry, svc *bill.Service) error {
 		{"alice", "YES"}, {"bob", "YES"}, {"carol", "YES"},
 	} {
 		p, _ := reg.Get(v.id)
-		if err := svc.VoteOnVersion(p.Invoker(), now-3400, "PROP-001", "1", v.choice); err != nil {
+		if _, err := svc.VoteOnVersion(p.Invoker(), now-3400, "PROP-001", "1", v.choice, coreElectorate); err != nil {
 			return fmt.Errorf("seed %s vote PROP-001: %w", v.id, err)
 		}
 	}
-	// Submit for formal voting, cast votes, end → executed
+	// Submit, formal votes, end → executed
 	if err := svc.SubmitBill(alice.Invoker(), "PROP-001",
-		fmt.Sprintf("%d", now-3300), "600",
+		fmt.Sprintf("%d", now-3300), "600", coreElectorate,
 	); err != nil {
 		return fmt.Errorf("seed submit PROP-001: %w", err)
 	}
@@ -150,18 +151,15 @@ func seedSampleBills(reg *Registry, svc *bill.Service) error {
 		{"alice", "YES"}, {"bob", "YES"}, {"carol", "YES"}, {"dave", "YES"}, {"eve", "ABSTAIN"},
 	} {
 		p, _ := reg.Get(v.id)
-		if err := svc.CastVote(p.Invoker(), now-3200, "PROP-001", v.choice); err != nil {
+		if _, err := svc.CastVote(p.Invoker(), now-3200, "PROP-001", v.choice); err != nil {
 			return fmt.Errorf("seed %s cast PROP-001: %w", v.id, err)
 		}
 	}
-	if err := svc.EndVote(savio.Invoker(), now-2600, "PROP-001"); err != nil {
+	if err := svc.EndVote(savio.Invoker(), now-2600, "PROP-001", coreElectorate); err != nil {
 		return fmt.Errorf("seed end PROP-001: %w", err)
 	}
 
 	// ── PROP-002: Feature proposal — Hotwire Turbo + Tailwind CSS ────
-	//
-	// Currently in draft with version agreement reached. The team voted
-	// to migrate the frontend; the owner can now open the formal window.
 	if err := svc.CreateBill(alice.Invoker(), now-1800, "PROP-002",
 		"QmHotwireTurboTailwind",
 		"Migrate dashboard frontend from hand-written CSS to Tailwind CSS with Hotwire Turbo for partial page updates and Turbo Streams over SSE",
@@ -171,11 +169,6 @@ func seedSampleBills(reg *Registry, svc *bill.Service) error {
 	); err != nil {
 		return fmt.Errorf("seed PROP-002: %w", err)
 	}
-	for _, vid := range []string{"alice", "bob", "carol", "dave", "eve"} {
-		if err := svc.AssignRoleForBill(savio.Invoker(), "PROP-002", vid, "VOTER"); err != nil {
-			return fmt.Errorf("seed assign %s to PROP-002: %w", vid, err)
-		}
-	}
 	for _, v := range []struct {
 		id     string
 		choice string
@@ -183,19 +176,12 @@ func seedSampleBills(reg *Registry, svc *bill.Service) error {
 		{"alice", "YES"}, {"carol", "YES"}, {"dave", "YES"},
 	} {
 		p, _ := reg.Get(v.id)
-		if err := svc.VoteOnVersion(p.Invoker(), now-1700, "PROP-002", "0", v.choice); err != nil {
+		if _, err := svc.VoteOnVersion(p.Invoker(), now-1700, "PROP-002", "0", v.choice, coreElectorate); err != nil {
 			return fmt.Errorf("seed %s vote PROP-002: %w", v.id, err)
 		}
 	}
-	// Version 0 is now agreed (3/5 ≥ 50% quorum, YES > NO). Owner can submit.
 
-	// ── PROP-003: Governance policy — require 60% quorum + absence counts ─
-	//
-	// A proposal to tighten governance rules: future architecture decisions
-	// should require 60% quorum and treat absent voters as implicit rejections.
-	// This uses ABSENCE in the reject mask so that people who don't show up
-	// effectively block change — forcing active engagement. Currently in draft,
-	// one version vote cast. Demonstrates the criteria mask system.
+	// ── PROP-003: Governance policy — 60% quorum + ABSENCE in reject ─
 	if err := svc.CreateBill(savio.Invoker(), now-900, "PROP-003",
 		"QmGovernanceQuorumPolicy",
 		"Require 60% quorum for architecture decisions; count absent voters toward rejection to ensure active participation",
@@ -205,20 +191,11 @@ func seedSampleBills(reg *Registry, svc *bill.Service) error {
 	); err != nil {
 		return fmt.Errorf("seed PROP-003: %w", err)
 	}
-	for _, vid := range []string{"alice", "bob", "carol", "dave", "eve"} {
-		if err := svc.AssignRoleForBill(savio.Invoker(), "PROP-003", vid, "VOTER"); err != nil {
-			return fmt.Errorf("seed assign %s to PROP-003: %w", vid, err)
-		}
-	}
-	if err := svc.VoteOnVersion(carol.Invoker(), now-800, "PROP-003", "0", "YES"); err != nil {
+	if _, err := svc.VoteOnVersion(carol.Invoker(), now-800, "PROP-003", "0", "YES", coreElectorate); err != nil {
 		return fmt.Errorf("seed carol vote PROP-003: %w", err)
 	}
 
 	// ── PROP-004: Community scope — contributor onboarding guide ──────
-	//
-	// A community-scoped proposal (not core architecture). Demonstrates
-	// the hierarchical scope system: community contributors can propose
-	// and vote here, while core decisions are gated to core members.
 	if err := svc.CreateBill(frank.Invoker(), now-600, "PROP-004",
 		"QmContributorOnboarding",
 		"Write a contributor onboarding guide covering local setup, coding standards, and the proposal workflow itself",
@@ -228,18 +205,8 @@ func seedSampleBills(reg *Registry, svc *bill.Service) error {
 	); err != nil {
 		return fmt.Errorf("seed PROP-004: %w", err)
 	}
-	for _, vid := range []string{"frank", "grace"} {
-		if err := svc.AssignRoleForBill(alice.Invoker(), "PROP-004", vid, "VOTER"); err != nil {
-			return fmt.Errorf("seed assign %s to PROP-004: %w", vid, err)
-		}
-	}
 
-	// ── PROP-005: Release approval — v0.2.0 ──────────────────────────
-	//
-	// A formal vote on whether to cut a release. This is the kind of
-	// decision a real project would gate behind the bill system: nobody
-	// ships unless a quorum of maintainers agrees the code is ready.
-	// Currently in the voting window (open for 24h from seed time).
+	// ── PROP-005: Release approval — v0.2.0, active voting window ────
 	if err := svc.CreateBill(savio.Invoker(), now-300, "PROP-005",
 		"QmReleaseV020Checklist",
 		"Approve release v0.2.0: gateway + dashboard + Tailwind/Turbo frontend, containerized with docker-compose",
@@ -249,38 +216,32 @@ func seedSampleBills(reg *Registry, svc *bill.Service) error {
 	); err != nil {
 		return fmt.Errorf("seed PROP-005: %w", err)
 	}
-	for _, vid := range []string{"alice", "bob", "carol", "dave", "eve"} {
-		if err := svc.AssignRoleForBill(savio.Invoker(), "PROP-005", vid, "VOTER"); err != nil {
-			return fmt.Errorf("seed assign %s to PROP-005: %w", vid, err)
-		}
-	}
-	// Three voters approve the version — 3/5 = 60% meets the quorum.
+	// 4 of 6 = 67% ≥ 60% quorum needed for PROP-005
 	for _, v := range []struct {
 		id     string
 		choice string
 	}{
-		{"alice", "YES"}, {"bob", "YES"}, {"carol", "YES"},
+		{"alice", "YES"}, {"bob", "YES"}, {"carol", "YES"}, {"dave", "YES"},
 	} {
 		p, _ := reg.Get(v.id)
-		if err := svc.VoteOnVersion(p.Invoker(), now-250, "PROP-005", "0", v.choice); err != nil {
+		if _, err := svc.VoteOnVersion(p.Invoker(), now-250, "PROP-005", "0", v.choice, coreElectorate); err != nil {
 			return fmt.Errorf("seed %s vote PROP-005: %w", v.id, err)
 		}
 	}
-	// Open a 24-hour voting window
 	if err := svc.SubmitBill(savio.Invoker(), "PROP-005",
-		fmt.Sprintf("%d", now-200), "86400",
+		fmt.Sprintf("%d", now-200), "86400", coreElectorate,
 	); err != nil {
 		return fmt.Errorf("seed submit PROP-005: %w", err)
 	}
-	// Two early votes cast; others haven't voted yet — the dashboard
-	// shows an active voting window the user can interact with.
-	if err := svc.CastVote(alice.Invoker(), now-150, "PROP-005", "YES"); err != nil {
+	// Two early votes cast — dashboard shows active window to interact with.
+	if _, err := svc.CastVote(alice.Invoker(), now-150, "PROP-005", "YES"); err != nil {
 		return fmt.Errorf("seed alice cast PROP-005: %w", err)
 	}
-	if err := svc.CastVote(dave.Invoker(), now-100, "PROP-005", "YES"); err != nil {
+	if _, err := svc.CastVote(dave.Invoker(), now-100, "PROP-005", "YES"); err != nil {
 		return fmt.Errorf("seed dave cast PROP-005: %w", err)
 	}
 
+	_ = communityElectorate // used by PROP-004 if votes were added
 	return nil
 }
 

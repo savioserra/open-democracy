@@ -44,6 +44,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/petitions", s.handleAPICreatePetition)
 	s.mux.HandleFunc("GET /api/petitions/{id}", s.handleAPIGetPetition)
 	s.mux.HandleFunc("POST /api/petitions/{id}/sign", s.handleAPISignPetition)
+	s.mux.HandleFunc("GET /api/votes/{voteId}", s.handleAPIVerifyVote)
 	s.mux.HandleFunc("GET /api/participants", s.handleAPIListParticipants)
 	s.mux.HandleFunc("GET /api/entities", s.handleAPIListEntities)
 	s.mux.HandleFunc("GET /api/events", s.handleAPIEventsHistory)

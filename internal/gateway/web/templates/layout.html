@@ -44,6 +44,14 @@
   </form>
 </header>
 
+{{if .Receipt}}
+<div class="mx-6 mt-4 rounded-md border border-amber-500/50 bg-amber-900/20 px-4 py-4 text-sm">
+  <strong class="text-amber-300">Vote recorded.</strong>
+  <span class="text-gray-300">Your one-time receipt ID (save it — it will not be shown again):</span>
+  <code class="ml-2 select-all rounded bg-[#0e1116] px-2 py-1 text-base font-bold text-amber-200">{{.Receipt}}</code>
+  <span class="ml-2 text-xs text-gray-400">Verify at <code>/api/votes/{{.Receipt}}</code></span>
+</div>
+{{end}}
 {{if .Flash}}
 <div class="mx-6 mt-4 rounded-md border border-green-600/50 bg-green-900/20 px-4 py-3 text-sm text-green-400">
   Action completed successfully.

@@ -103,6 +103,28 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 }
 
+// electorateForScope counts how many registered participants have scope
+// claims covering the given scope. This is the denominator for quorum and
+// the source of ABSENCE at vote close time.
+func (s *Server) electorateForScope(scope string) int {
+	n := 0
+	for _, p := range s.registry.List() {
+		if p.Invoker().InScope(scope) {
+			n++
+		}
+	}
+	return n
+}
+
+// electorateForBill looks up the bill's scope and returns the electorate.
+func (s *Server) electorateForBill(billID string) int {
+	b, err := s.svc.GetBill(billID)
+	if err != nil {
+		return 0
+	}
+	return s.electorateForScope(b.Scope)
+}
+
 // callerFromRequest resolves the X-User header (or DefaultUser) into an
 // *bill.Invoker via the participant registry. It is the gateway's stand-in
 // for the X.509 certificate the chaincode would receive in a real Fabric

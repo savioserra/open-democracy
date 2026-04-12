@@ -107,63 +107,66 @@ func TestEditBillRequiresEditorOrOwner(t *testing.T) {
 
 func TestVotingFlowEndToEnd(t *testing.T) {
 	svc, sink := newTestService()
+	electorate := 4 // simulating 4 in-scope participants
 	owner := proposer("owner", "ES:UNION")
 	if err := svc.CreateBill(owner, 1, "B1", "Qm1", "v1", "0.5", "ES:UNION:*", "YES", "NO"); err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	// Admin grants voter roles to three users
-	a := admin("ES:UNION")
-	for _, u := range []string{"v1", "v2", "v3"} {
-		if err := svc.AssignRoleForBill(a, "B1", u, "VOTER"); err != nil {
-			t.Fatalf("assign %s: %v", u, err)
-		}
-	}
-	// Grant owner voter too so owner is eligible (owner already had PROPOSER|EDITOR)
-	if err := svc.AssignRoleForBill(a, "B1", "owner", "VOTER"); err != nil {
-		t.Fatalf("assign owner: %v", err)
-	}
+	// No VOTER role assignment needed — scope is the authorization.
 	v1 := voter("v1", "ES:UNION")
 	v2 := voter("v2", "ES:UNION")
 	v3 := voter("v3", "ES:UNION")
-	if err := svc.VoteOnVersion(v1, 10, "B1", "0", "YES"); err != nil {
+	if _, err := svc.VoteOnVersion(v1, 10, "B1", "0", "YES", electorate); err != nil {
 		t.Fatalf("v1 yes: %v", err)
 	}
-	if err := svc.VoteOnVersion(v2, 11, "B1", "0", "YES"); err != nil {
+	if _, err := svc.VoteOnVersion(v2, 11, "B1", "0", "YES", electorate); err != nil {
 		t.Fatalf("v2 yes: %v", err)
 	}
-	// Quorum should now be reached (2/4 = 50%) and execMask>rejMask, version agreed
+	// Quorum reached (2/4 = 50%), version agreed
 	b, _ := svc.GetBill("B1")
 	if b.AgreedVersionIndex != 0 {
 		t.Fatalf("expected version 0 agreed, got %d", b.AgreedVersionIndex)
 	}
 	// Submit for formal voting
-	if err := svc.SubmitBill(owner, "B1", "100", "100"); err != nil {
+	if err := svc.SubmitBill(owner, "B1", "100", "100", electorate); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
 	b, _ = svc.GetBill("B1")
 	if b.Status != StatusVoting {
 		t.Fatalf("expected voting status, got %s", b.Status)
 	}
-	// Cast formal votes within window: 3 yes, owner abstains
+	// Cast formal votes — anyone in scope can vote, returns receipt IDs
 	owner2 := NewInvoker("owner", []string{"ES:UNION:PROPOSER"})
-	if err := svc.CastVote(v1, 150, "B1", "YES"); err != nil {
+	receipt1, err := svc.CastVote(v1, 150, "B1", "YES")
+	if err != nil {
 		t.Fatalf("v1 cast: %v", err)
 	}
-	if err := svc.CastVote(v2, 150, "B1", "YES"); err != nil {
+	if receipt1 == "" {
+		t.Fatal("expected non-empty vote receipt")
+	}
+	if _, err := svc.CastVote(v2, 150, "B1", "YES"); err != nil {
 		t.Fatalf("v2 cast: %v", err)
 	}
-	if err := svc.CastVote(v3, 150, "B1", "YES"); err != nil {
+	if _, err := svc.CastVote(v3, 150, "B1", "YES"); err != nil {
 		t.Fatalf("v3 cast: %v", err)
 	}
-	if err := svc.CastVote(owner2, 150, "B1", "ABSTAIN"); err != nil {
+	if _, err := svc.CastVote(owner2, 150, "B1", "ABSTAIN"); err != nil {
 		t.Fatalf("owner cast: %v", err)
 	}
+	// Verify vote receipt
+	r, err := svc.VerifyVote(receipt1)
+	if err != nil {
+		t.Fatalf("verify: %v", err)
+	}
+	if r.BillID != "B1" || r.Choice != ChoiceYes {
+		t.Fatalf("receipt mismatch: %+v", r)
+	}
 	// Try ending too early
-	if err := svc.EndVote(owner, 150, "B1"); err == nil {
+	if err := svc.EndVote(owner, 150, "B1", electorate); err == nil {
 		t.Fatal("expected end vote too early error")
 	}
 	// End after window
-	if err := svc.EndVote(owner, 999, "B1"); err != nil {
+	if err := svc.EndVote(owner, 999, "B1", electorate); err != nil {
 		t.Fatalf("end vote: %v", err)
 	}
 	b, _ = svc.GetBill("B1")
@@ -177,19 +180,27 @@ func TestVotingFlowEndToEnd(t *testing.T) {
 
 func TestCastVoteRejectsOutsideWindow(t *testing.T) {
 	svc, _ := newTestService()
+	electorate := 2
 	owner := proposer("owner", "ES:UNION")
 	_ = svc.CreateBill(owner, 1, "B1", "Qm1", "v1", "0.5", "ES:UNION:*", "YES", "NO")
-	a := admin("ES:UNION")
-	_ = svc.AssignRoleForBill(a, "B1", "owner", "VOTER")
-	_ = svc.AssignRoleForBill(a, "B1", "v1", "VOTER")
 	v := voter("v1", "ES:UNION")
-	_ = svc.VoteOnVersion(v, 10, "B1", "0", "YES")
-	_ = svc.VoteOnVersion(NewInvoker("owner", []string{"ES:UNION:PROPOSER"}), 11, "B1", "0", "YES")
-	if err := svc.SubmitBill(owner, "B1", "200", "100"); err != nil {
+	_, _ = svc.VoteOnVersion(v, 10, "B1", "0", "YES", electorate)
+	_, _ = svc.VoteOnVersion(NewInvoker("owner", []string{"ES:UNION:PROPOSER"}), 11, "B1", "0", "YES", electorate)
+	if err := svc.SubmitBill(owner, "B1", "200", "100", electorate); err != nil {
 		t.Fatalf("submit: %v", err)
 	}
-	if err := svc.CastVote(v, 50, "B1", "YES"); err == nil {
+	if _, err := svc.CastVote(v, 50, "B1", "YES"); err == nil {
 		t.Fatal("expected outside-window error")
+	}
+}
+
+func TestScopeBasedVotingRejectsOutOfScope(t *testing.T) {
+	svc, _ := newTestService()
+	owner := proposer("owner", "ES:UNION:DIV1")
+	_ = svc.CreateBill(owner, 1, "B1", "Qm1", "v1", "0.5", "ES:UNION:DIV1:*", "YES", "NO")
+	outsider := NewInvoker("outsider", []string{"ES:UNION:DIV2"})
+	if _, err := svc.VoteOnVersion(outsider, 10, "B1", "0", "YES", 5); err == nil {
+		t.Fatal("expected scope rejection for out-of-scope voter")
 	}
 }
 

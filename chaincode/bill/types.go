@@ -99,9 +99,22 @@ type Version struct {
     Votes       map[string]Vote   `json:"votes"`
 }
 
-// Vote cast by a user
+// Vote cast by a user. The VoterID is stored on the bill for tallying.
+// The VoteID is a random receipt token returned once to the voter and
+// stored separately in a receipt record (without voter identity) so the
+// voter can verify their vote was counted without anyone else being able
+// to link the receipt back to them through the system.
 type Vote struct {
     VoterID   string `json:"voterId"`
+    Choice    Choice `json:"choice"`
+    Timestamp int64  `json:"timestamp"`
+}
+
+// VoteReceipt is stored under RECEIPT|{voteID}. It deliberately does NOT
+// contain the voter identity — only the vote ID holder can prove ownership.
+type VoteReceipt struct {
+    VoteID    string `json:"voteId"`
+    BillID    string `json:"billId"`
     Choice    Choice `json:"choice"`
     Timestamp int64  `json:"timestamp"`
 }

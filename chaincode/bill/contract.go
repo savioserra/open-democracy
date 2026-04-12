@@ -2,6 +2,8 @@ package bill
 
 import (
 	"encoding/json"
+	"fmt"
+	"strconv"
 
 	"github.com/golang/protobuf/ptypes/timestamp"
 	"github.com/hyperledger/fabric-contract-api-go/contractapi"
@@ -59,43 +61,54 @@ func (c *BillContract) AssignRoleForBill(ctx contractapi.TransactionContextInter
 	return c.service(ctx).AssignRoleForBill(caller, billID, userID, role)
 }
 
-// VoteOnVersion records a vote against a draft version.
-func (c *BillContract) VoteOnVersion(ctx contractapi.TransactionContextInterface, billID, versionIndex, choice string) error {
+// VoteOnVersion records a vote against a draft version. electorate is the
+// number of in-scope participants (from MSP or external source).
+func (c *BillContract) VoteOnVersion(ctx contractapi.TransactionContextInterface, billID, versionIndex, choice, electorate string) (string, error) {
 	caller, err := GetInvoker(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
 	now, err := txTimestampSeconds(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
-	return c.service(ctx).VoteOnVersion(caller, now, billID, versionIndex, choice)
+	n, err := strconv.Atoi(electorate)
+	if err != nil || n < 0 {
+		return "", fmt.Errorf("invalid electorate: %s", electorate)
+	}
+	return c.service(ctx).VoteOnVersion(caller, now, billID, versionIndex, choice, n)
 }
 
 // SubmitBill opens the formal voting window.
-func (c *BillContract) SubmitBill(ctx contractapi.TransactionContextInterface, billID, startTimeSeconds, durationSeconds string) error {
+func (c *BillContract) SubmitBill(ctx contractapi.TransactionContextInterface, billID, startTimeSeconds, durationSeconds, electorate string) error {
 	caller, err := GetInvoker(ctx)
 	if err != nil {
 		return err
 	}
-	return c.service(ctx).SubmitBill(caller, billID, startTimeSeconds, durationSeconds)
+	n, err := strconv.Atoi(electorate)
+	if err != nil || n < 0 {
+		return fmt.Errorf("invalid electorate: %s", electorate)
+	}
+	return c.service(ctx).SubmitBill(caller, billID, startTimeSeconds, durationSeconds, n)
 }
 
-// CastVote records a vote during the open voting window.
-func (c *BillContract) CastVote(ctx contractapi.TransactionContextInterface, billID, choice string) error {
+// CastVote records a vote during the open voting window. Returns the
+// one-time vote receipt ID.
+func (c *BillContract) CastVote(ctx contractapi.TransactionContextInterface, billID, choice string) (string, error) {
 	caller, err := GetInvoker(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
 	now, err := txTimestampSeconds(ctx)
 	if err != nil {
-		return err
+		return "", err
 	}
 	return c.service(ctx).CastVote(caller, now, billID, choice)
 }
 
-// EndVote finalizes the vote.
-func (c *BillContract) EndVote(ctx contractapi.TransactionContextInterface, billID string) error {
+// EndVote finalizes the vote. electorate is the in-scope participant count
+// at close time.
+func (c *BillContract) EndVote(ctx contractapi.TransactionContextInterface, billID, electorate string) error {
 	caller, err := GetInvoker(ctx)
 	if err != nil {
 		return err
@@ -104,7 +117,11 @@ func (c *BillContract) EndVote(ctx contractapi.TransactionContextInterface, bill
 	if err != nil {
 		return err
 	}
-	return c.service(ctx).EndVote(caller, now, billID)
+	n, err := strconv.Atoi(electorate)
+	if err != nil || n < 0 {
+		return fmt.Errorf("invalid electorate: %s", electorate)
+	}
+	return c.service(ctx).EndVote(caller, now, billID, n)
 }
 
 // SetBillScope updates the scope of a bill.
