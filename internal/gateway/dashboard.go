@@ -207,6 +207,51 @@ func (s *Server) handleParticipantsPage(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+func (s *Server) handleFormAddParticipant(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	id := strings.TrimSpace(r.FormValue("id"))
+	display := strings.TrimSpace(r.FormValue("display"))
+	rawClaims := strings.TrimSpace(r.FormValue("claims"))
+
+	if id == "" || rawClaims == "" {
+		s.redirectAfterAction(w, r, "/participants", fmt.Errorf("id and scope claims are required"))
+		return
+	}
+
+	// Split claims by comma, semicolon, or newline.
+	var claims []string
+	for _, c := range strings.FieldsFunc(rawClaims, func(r rune) bool {
+		return r == ',' || r == ';' || r == '\n'
+	}) {
+		c = strings.TrimSpace(c)
+		if c != "" {
+			claims = append(claims, c)
+		}
+	}
+
+	if len(claims) == 0 {
+		s.redirectAfterAction(w, r, "/participants", fmt.Errorf("at least one scope claim is required"))
+		return
+	}
+
+	p := Participant{ID: id, Display: display, Claims: claims}
+	err := s.saveParticipant(p)
+	s.redirectAfterAction(w, r, "/participants", err)
+}
+
+func (s *Server) handleFormRemoveParticipant(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	id := strings.TrimSpace(r.FormValue("id"))
+	err := s.removeParticipant(id)
+	s.redirectAfterAction(w, r, "/participants", err)
+}
+
 // Entities page.
 func (s *Server) handleEntitiesPage(w http.ResponseWriter, r *http.Request) {
 	ents, err := s.collectEntities()

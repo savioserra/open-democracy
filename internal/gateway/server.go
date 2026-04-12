@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
@@ -51,6 +52,17 @@ func NewServer(cfg Config) (*Server, error) {
 	bcast := NewBroadcaster(500)
 	svc := bill.NewService(store, bcast)
 	reg := NewRegistry()
+	// Pre-create the server so we can use loadPersistedParticipants before
+	// seeding defaults. This ensures user-added participants survive restarts
+	// and seed only fills in missing defaults.
+	s := &Server{
+		cfg:         cfg,
+		store:       store,
+		svc:         svc,
+		registry:    reg,
+		broadcaster: bcast,
+	}
+	s.loadPersistedParticipants()
 	if err := Seed(reg, svc); err != nil {
 		return nil, fmt.Errorf("seed: %w", err)
 	}
@@ -62,16 +74,9 @@ func NewServer(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, fmt.Errorf("static fs: %w", err)
 	}
-	s := &Server{
-		cfg:         cfg,
-		store:       store,
-		svc:         svc,
-		registry:    reg,
-		broadcaster: bcast,
-		templates:   tmpls,
-		staticFS:    staticFS,
-		mux:         http.NewServeMux(),
-	}
+	s.templates = tmpls
+	s.staticFS = staticFS
+	s.mux = http.NewServeMux()
 	s.routes()
 	return s, nil
 }
@@ -100,6 +105,54 @@ func (s *Server) Run(ctx context.Context) error {
 		return nil
 	case err := <-errCh:
 		return err
+	}
+}
+
+// --- participant persistence -------------------------------------------------
+// Participants are stored alongside bills in the same PersistedStore using a
+// "PARTICIPANT|{id}" key prefix. This way they survive restarts without
+// adding a separate file.
+
+// saveParticipant persists a participant to the store and adds it to the
+// in-memory registry.
+func (s *Server) saveParticipant(p Participant) error {
+	data, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	if err := s.store.Put(participantKeyPrefix+p.ID, data); err != nil {
+		return err
+	}
+	s.registry.Add(p)
+	return nil
+}
+
+// removeParticipant removes a participant from the store and registry.
+func (s *Server) removeParticipant(id string) error {
+	if !s.registry.Remove(id) {
+		return errors.New("unknown participant: " + id)
+	}
+	// Remove from the store. Put an empty value (the store treats it as a
+	// delete on next load since we filter empty values).
+	return s.store.Put(participantKeyPrefix+id, []byte{})
+}
+
+// loadPersistedParticipants reads any participants from the store and adds
+// them to the registry. Called during startup before seeding.
+func (s *Server) loadPersistedParticipants() {
+	kvs, err := s.store.ScanByPrefix(participantKeyPrefix)
+	if err != nil {
+		return
+	}
+	for _, kv := range kvs {
+		if len(kv.Value) == 0 {
+			continue
+		}
+		var p Participant
+		if err := json.Unmarshal(kv.Value, &p); err != nil {
+			continue
+		}
+		s.registry.Add(p)
 	}
 }
 
