@@ -1,0 +1,92 @@
+{{define "content"}}
+<div class="mb-6">
+  <h2 class="text-xl font-bold">Delegations</h2>
+  <p class="text-sm text-gray-400">
+    Liquid democracy: delegate your vote to someone you trust for a specific scope.
+    You can have a different delegate at each scope level — like having different
+    representatives at neighborhood, city, state, and federal levels. Your delegate
+    votes on your behalf, but if you vote directly on a bill, your direct vote always
+    wins. Delegations are depth-1 (no transitive chains — your delegate must vote
+    personally) and revocable at any time.
+  </p>
+  <p class="mt-2 text-xs text-gray-500">
+    Grounded in the Brazilian Constitution, Art. 1, sole paragraph:
+    <em>"All power emanates from the people, who exercise it through elected representatives or directly."</em>
+  </p>
+</div>
+
+{{$delegations := .Data}}
+{{if $delegations}}
+<div class="overflow-x-auto rounded-lg border border-border">
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="border-b border-border bg-surface-2 text-xs uppercase tracking-wider text-gray-400">
+        <th class="px-4 py-3 text-left font-semibold">Delegator</th>
+        <th class="px-4 py-3 text-left font-semibold">→</th>
+        <th class="px-4 py-3 text-left font-semibold">Delegatee</th>
+        <th class="px-4 py-3 text-left font-semibold">Scope</th>
+        <th class="px-4 py-3 text-left font-semibold">Since</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-border">
+    {{range $delegations}}
+      <tr class="bg-surface transition-colors hover:bg-surface-2">
+        <td class="px-4 py-3 text-gray-300">{{.Delegator}}</td>
+        <td class="px-4 py-3 text-gray-500">→</td>
+        <td class="px-4 py-3 font-medium text-blue-400">{{.Delegatee}}</td>
+        <td class="px-4 py-3"><code class="rounded bg-surface-2 px-1.5 py-0.5 text-xs">{{.Scope}}</code></td>
+        <td class="px-4 py-3 text-gray-400 text-xs">{{formatTime .Timestamp}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+</div>
+{{else}}
+<p class="italic text-gray-500">No delegations yet. Everyone is voting directly.</p>
+{{end}}
+
+<div class="mt-8 grid grid-cols-1 gap-4 lg:grid-cols-2">
+  <section class="rounded-lg border border-border bg-surface p-6">
+    <h3 class="mb-4 text-lg font-semibold">Delegate your vote</h3>
+    <p class="mb-4 text-sm text-gray-400">
+      Choose someone you trust to vote on your behalf in a scope. You can always
+      override by voting directly on any specific bill.
+    </p>
+    <form method="post" action="/actions/delegate" data-turbo-frame="_top" class="flex flex-wrap items-end gap-3">
+      <input type="hidden" name="_user" value="{{.AsUser}}">
+      <label class="flex flex-col gap-1 text-xs text-gray-400">
+        Delegate to
+        <select name="delegatee" class="rounded border border-border bg-surface-2 px-3 py-2 text-sm text-gray-200 outline-none focus:border-blue-500">
+          {{range .Users}}
+            <option value="{{.ID}}">{{.Display}}</option>
+          {{end}}
+        </select>
+      </label>
+      <label class="flex flex-col gap-1 text-xs text-gray-400">
+        Scope
+        <input name="scope" required placeholder="OPENDEMOCRACY:CORE:*" class="rounded border border-border bg-surface-2 px-3 py-2 text-sm text-gray-200 outline-none placeholder:text-gray-600 focus:border-blue-500">
+      </label>
+      <button type="submit" class="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-500">
+        Delegate
+      </button>
+    </form>
+  </section>
+
+  <section class="rounded-lg border border-border bg-surface p-6">
+    <h3 class="mb-4 text-lg font-semibold">Revoke delegation</h3>
+    <p class="mb-4 text-sm text-gray-400">
+      Take your vote back. You will vote directly on all future bills in this scope.
+    </p>
+    <form method="post" action="/actions/revoke-delegation" data-turbo-frame="_top" class="flex flex-wrap items-end gap-3">
+      <input type="hidden" name="_user" value="{{.AsUser}}">
+      <label class="flex flex-col gap-1 text-xs text-gray-400">
+        Scope
+        <input name="scope" required placeholder="OPENDEMOCRACY:CORE:*" class="rounded border border-border bg-surface-2 px-3 py-2 text-sm text-gray-200 outline-none placeholder:text-gray-600 focus:border-blue-500">
+      </label>
+      <button type="submit" class="rounded bg-red-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-red-500">
+        Revoke
+      </button>
+    </form>
+  </section>
+</div>
+{{end}}

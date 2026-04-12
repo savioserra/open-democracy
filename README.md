@@ -2,10 +2,59 @@
 
 A minimal yet functional implementation of a democratic decision-making workflow on a permissioned blockchain (Hyperledger Fabric). It includes:
 
-- Chaincode (Go) for bills/proposals, per-bill RBAC using bitwise roles, hierarchical scope checks from X.509 attributes, versioning of bill text (via IPFS hash) and domain events;
-- A lightweight off‑chain event listener (Go, Fabric SDK) that subscribes to chaincode events.
+- **Chaincode (Go)** for bills/proposals, per-bill RBAC using bitwise roles, hierarchical scope checks from X.509 attributes, versioning of bill text (via IPFS hash) and domain events;
+- A pure-Go **Service** layer that owns the business rules, used both by the chaincode entrypoint inside Fabric and by the in-process gateway outside it;
+- A **Gateway + Dashboard** (`cmd/gateway`) that runs the same Service against a JSON-backed local store and exposes a REST API and a server-rendered HTML dashboard for bills, versions, votes, roles, participants, entities, and a live event feed (Server-Sent Events);
+- A **Dockerfile + docker-compose** so the whole project can be brought up with a single command and the dashboard explored in a browser at `http://localhost:8080/`;
+- A lightweight off‑chain event listener (Go, Fabric SDK, behind the `fabric_sdk` build tag) that subscribes to chaincode events when deployed against a real Fabric network.
 
 This repository is intended as a clear, extensible base to prototype governance and participatory decision-making.
+
+## Quickstart (dashboard in a container)
+
+```
+docker compose up --build
+# then open http://localhost:8080/
+```
+
+The first boot seeds the ledger with **the project's own governance structure**
+— participants are project contributors (Savio the lead, Alice the senior
+maintainer, Bob the reviewer, community members, etc.) and proposals represent
+real repository decisions:
+
+| Proposal | Status | Purpose |
+|---|---|---|
+| **PROP-001** | `executed` | Architecture decision: extract the Service layer (completed full cycle) |
+| **PROP-002** | `draft` (agreed) | Feature: migrate to Hotwire Turbo + Tailwind (ready for voting window) |
+| **PROP-003** | `draft` | Governance: tighten quorum to 60% and count absence as rejection |
+| **PROP-004** | `draft` | Community: contributor onboarding guide (community scope, not core) |
+| **PROP-005** | `voting` | Release approval: v0.2.0 (active window, 2 of 5 votes cast — try it!) |
+
+Use the "Acting as" selector in the header to switch between identities and
+exercise the workflow:
+
+- Create a proposal (PROPOSER or ADMIN authority required for the chosen scope)
+- Add new versions while in draft (EDITOR or owner)
+- Assign per-bill roles (ADMIN with hierarchical scope coverage)
+- Vote on a draft version (VOTER role) until quorum + criteria are met → version is "agreed"
+- Open the formal voting window (owner / proposer)
+- Cast formal votes within the window (VOTER)
+- End the vote and watch the proposal transition to `executed` or `rejected`
+
+The bill ledger persists to a Docker volume (`open-democracy-ledger`), so the
+dashboard survives restarts. Drop the volume with `docker compose down -v` to
+re-seed.
+
+### Local development without Docker
+
+```
+make test          # run unit tests
+make run           # build and run the gateway on :8080 with ./data/ledger.json
+```
+
+Both modes use the same `bill.Service` that the chaincode wraps; only the
+storage backend (Fabric stub vs. JSON file) and the identity source (X.509
+attributes vs. seeded participants) differ.
 
 ## Introduction
 
@@ -49,24 +98,83 @@ Optional (for the listener):
 .
 ├── chaincode/
 │   └── bill/
-│       ├── types.go           # Data model (Bill, Version, Vote), bitwise Roles/Choices, Criteria
-│       ├── contract.go        # Business rules, hierarchical scope checks, events
+│       ├── types.go            # Data model (Bill, Version, Vote), bitwise Roles/Choices, Criteria
+│       ├── invoker.go          # Pure-data Invoker with hierarchical scope helpers
+│       ├── store.go            # Store interface + chaincode-stub adapter
+│       ├── memstore.go         # In-memory Store used by the gateway and tests
+│       ├── events.go           # EventSink interface + chaincode-stub adapter
+│       ├── service.go          # Pure-Go business logic (CreateBill, voting, etc.)
+│       ├── service_test.go     # Unit tests covering RBAC, scope, voting, end-to-end flow
+│       ├── helpers.go          # Small string utilities
+│       ├── contract.go         # Thin Fabric chaincode wrappers around Service
 │       └── cmd/
-│           └── main.go        # Chaincode entrypoint
+│           └── main.go         # Chaincode entrypoint
+├── cmd/
+│   └── gateway/
+│       └── main.go             # Gateway entrypoint (REST + dashboard, persists to JSON)
+├── internal/
+│   └── gateway/
+│       ├── server.go           # HTTP server, embedded templates, middleware
+│       ├── routes.go           # Route table
+│       ├── api.go              # REST handlers + DTOs + SSE stream
+│       ├── dashboard.go        # HTML dashboard handlers + form actions
+│       ├── store.go            # JSON file persistence on top of bill.MemStore
+│       ├── identity.go         # Participant registry (gateway's stand-in for X.509)
+│       ├── seed.go             # Seeded participants and sample bills
+│       ├── events.go           # In-process event broadcaster (history + live subscribers)
+│       └── web/
+│           ├── templates/      # layout.html + per-page templates (bill, entities, etc.)
+│           └── static/style.css
 ├── notify/
 │   └── listener/
-│       └── main.go            # Event listener skeleton (Fabric SDK)
+│       └── main.go             # Real-Fabric SDK listener (build tag: fabric_sdk)
+├── Dockerfile                  # Multi-stage static-binary build
+├── docker-compose.yml          # Single-service stack with persistent volume
+├── Makefile                    # test / build / run / image / up / down / logs
 ├── go.mod
-├── plan.pdf
 └── README.md
 ```
 
 ## Architecture Overview
 
-- Network: Hyperledger Fabric 2.5+ (peers per org, ordering service, channels by domain)
-- Identity: X.509 certificates carry hierarchical scope claims in attributes `scope` or `scopes`. A claim looks like `SEG1:SEG2:...:SEGN:ROLE`, where ROLE ∈ {ADMIN, PROPOSER, EDITOR, VOTER, AUDITOR}. Wildcard `*` is supported per segment.
-- Chaincode: Implements Bills, Versions, per-bill Roles, Version votes (in draft), formal voting window, and events.
-- Off‑chain: Listener subscribes to events for notification workflows; full text is stored off‑chain (e.g., IPFS), on‑chain stores hashes.
+The project ships two deployment modes that share the same business logic:
+
+```
+                  ┌─────────────────────────────┐
+                  │       bill.Service          │
+                  │  (pure Go, no Fabric deps)  │
+                  └──────┬───────────────┬──────┘
+                         │               │
+                ┌────────▼────┐    ┌─────▼──────┐
+                │  Store /    │    │ EventSink  │
+                │  EventSink  │    │            │
+                │  interfaces │    │            │
+                └────┬───┬────┘    └──┬───┬─────┘
+                     │   │            │   │
+        ┌────────────▼┐  └────┐  ┌────┘   └──────────┐
+        │ Fabric stub │       │  │                   │
+        │ adapters    │       │  │                   │
+        │ (chaincode) │       │  │                   │
+        └──────┬──────┘       │  │                   │
+               │              │  │                   │
+        ┌──────▼──────────┐   │  │   ┌───────────────▼───────────────┐
+        │ Hyperledger     │   │  │   │  In-process gateway           │
+        │ Fabric peers    │   │  │   │  (cmd/gateway)                │
+        │ + chaincode/cmd │   │  │   │   • JSON-file Store           │
+        └─────────────────┘   │  │   │   • SSE event broadcaster     │
+                              │  │   │   • REST API + HTML dashboard │
+                              │  │   │   • Seeded Participant registry│
+                              │  │   └───────────────────────────────┘
+                              │  │
+                              ▼  ▼
+                       MemStore + tests
+```
+
+- **Network (real deployment):** Hyperledger Fabric 2.5+ (peers per org, ordering service, channels by domain).
+- **Identity (real deployment):** X.509 certificates carry hierarchical scope claims in attributes `scope` or `scopes`. A claim looks like `SEG1:SEG2:...:SEGN:ROLE`, where ROLE ∈ {ADMIN, PROPOSER, EDITOR, VOTER, AUDITOR}. Wildcard `*` is supported per segment.
+- **Identity (gateway demo):** A `Participant` registry seeded at startup, with the same string-based scope claim format. The gateway resolves the active user from the `X-User` header (REST), the `?as=` query string (dashboard), or the `_user` form field.
+- **Chaincode:** Thin wrappers in `chaincode/bill/contract.go` extract caller + tx timestamp from the Fabric context and call into `bill.Service`. Both deployment paths execute the exact same RBAC, scope, quorum, and criteria rules.
+- **Off‑chain:** A real Fabric event listener still lives in `notify/listener/main.go` behind the `fabric_sdk` build tag (the upstream `fabric-sdk-go` is end-of-life and incompatible with the current `fabric-protos-go`, so it is not built by default). For the dashboard scenario the gateway's in-process broadcaster supersedes it: every domain event is fanned out to a ring buffer for the `/events` page and to a Server-Sent Events stream at `/api/events/stream`.
 
 ## Data Model (on‑ledger)
 
@@ -140,9 +248,70 @@ Notes:
 - VoteEnded
 - CriteriaUpdated
 
-## Off‑chain Listener
+## Gateway and Dashboard
 
-File: `notify/listener/main.go`
+`cmd/gateway` is the dashboard binary. It runs the same `bill.Service` the
+chaincode wraps, against a JSON-backed local store, and exposes:
+
+- **Dashboard pages** (server-rendered with `html/template`)
+  - `GET /` — bills list with status, quorum, scope, version count
+  - `GET /bills/{id}` — bill detail (versions, roles, formal votes, action forms)
+  - `GET /participants` — directory of seeded identities and their scope claims
+  - `GET /entities` — top-level scope segments with bills + participants under each
+  - `GET /events` — chronological event feed updated live via SSE
+- **REST API** (JSON over HTTP)
+  - `GET /api/health`
+  - `GET /api/bills` · `POST /api/bills` · `GET /api/bills/{id}`
+  - `POST /api/bills/{id}/versions` (edit) · `POST /api/bills/{id}/versions/{idx}/votes`
+  - `POST /api/bills/{id}/roles` · `POST /api/bills/{id}/submit`
+  - `POST /api/bills/{id}/votes` (cast) · `POST /api/bills/{id}/end`
+  - `GET /api/participants` · `GET /api/entities`
+  - `GET /api/events` · `GET /api/events/stream` (SSE)
+
+Authorization is resolved per request from one of (in priority order):
+1. The `_user` form field (dashboard form actions)
+2. The `X-User` header (REST API)
+3. The `?as=` query string (dashboard navigation)
+4. `GATEWAY_USER` environment variable (default participant id)
+
+The id is looked up in the participant registry; the registry produces an
+`*bill.Invoker` carrying the same kind of scope claims a Fabric X.509 cert
+would carry, and the Service makes its authorization decisions on that.
+
+### Configuration
+
+| Variable        | Default      | Purpose                                  |
+|-----------------|--------------|------------------------------------------|
+| `GATEWAY_ADDR`  | `:8080`      | Listen address                           |
+| `GATEWAY_DATA`  | `./data`     | Directory for `ledger.json` persistence  |
+| `GATEWAY_USER`  | `ada`        | Default acting user                      |
+
+### Curl examples
+
+```bash
+# Health
+curl localhost:8080/api/health
+
+# Create a bill as Ada (Division 1 proposer)
+curl -X POST localhost:8080/api/bills \
+  -H 'X-User: ada' -H 'Content-Type: application/json' \
+  -d '{"id":"BILL-123","ipfsHash":"QmHash","description":"…","quorum":"0.5","scope":"ES:TEACHER_UNION:DIVISION_1:*","executeMask":"YES","rejectMask":"NO"}'
+
+# Assign a voter as Felipe (Division 1 admin)
+curl -X POST localhost:8080/api/bills/BILL-123/roles \
+  -H 'X-User: felipe' -H 'Content-Type: application/json' \
+  -d '{"userId":"carla","role":"VOTER"}'
+
+# Subscribe to live events
+curl -N localhost:8080/api/events/stream
+```
+
+## Off‑chain Listener (real Fabric only)
+
+File: `notify/listener/main.go`. Built only with `-tags fabric_sdk` because
+the upstream `fabric-sdk-go` is end-of-life and incompatible with the
+`fabric-protos-go` version pulled in by the chaincode. For the dashboard
+scenario the gateway's broadcaster (`/api/events/stream`) supersedes it.
 
 Environment variables:
 - FABRIC_SDK_CONFIG: path to the connection profile YAML
@@ -152,16 +321,9 @@ Environment variables:
 - FABRIC_CC: chaincode name (e.g., bill)
 - FABRIC_EVENT_FILTER: regex for event names (e.g., `.*`)
 
-Run:
+Run (real Fabric network only):
 ```
-export FABRIC_SDK_CONFIG=$PWD/connection-profile.yaml
-export FABRIC_CHANNEL=mychannel
-export FABRIC_ORG=Org1
-export FABRIC_USER=User1
-export FABRIC_CC=bill
-export FABRIC_EVENT_FILTER=.*
-
-go run ./notify/listener
+go run -tags fabric_sdk ./notify/listener
 ```
 
 Replace `notifyUsersOfNewBill` with your messaging integration (e-mail, push, etc.).
@@ -202,7 +364,12 @@ Notes:
 
 ## Roadmap
 
-- Unit and integration tests for RBAC, scope checks, quorum logic, and events
-- Preference service and real notification channels for the listener
-- Web/API layer for certificate-based auth and IPFS integration
+- ~~Unit tests for RBAC, scope checks, quorum logic, and events~~ (done — `chaincode/bill/service_test.go`)
+- ~~Web/API layer to drive the chaincode workflows~~ (done — `cmd/gateway` + dashboard)
+- ~~Container build and one-command bring-up~~ (done — `Dockerfile`, `docker-compose.yml`, `Makefile`)
+- Real Hyperledger Fabric network bring-up via `fabric-samples/test-network`, with the gateway pointing at it through a Fabric Gateway client instead of the in-process Service
+- Replace the JSON-file Store with bbolt or Postgres for higher write volume
+- Migrate the listener off the end-of-life `fabric-sdk-go` to `fabric-gateway`
+- Real notification channels (e-mail, push) for the listener
+- Certificate-based auth and IPFS pinning integration
 - Governance-driven evolution of roles and criteria masks

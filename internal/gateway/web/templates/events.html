@@ -1,0 +1,24 @@
+{{define "content"}}
+<div class="mb-6">
+  <h2 class="text-xl font-bold">Events</h2>
+  <p class="text-sm text-gray-400">
+    Domain events emitted by the bill ledger, in chronological order.
+    The list updates live via <code class="rounded bg-surface-2 px-1 py-0.5 text-xs">turbo-stream-source</code> connected to
+    <code class="rounded bg-surface-2 px-1 py-0.5 text-xs">/api/events/turbo-stream</code>.
+  </p>
+</div>
+
+<turbo-stream-source src="/api/events/turbo-stream"></turbo-stream-source>
+
+<div id="event-list" class="space-y-3">
+  {{range .Data}}
+    <div id="event-{{.Seq}}" class="rounded-lg border border-border bg-surface px-4 py-3">
+      <div class="flex items-center gap-2">
+        <strong class="text-sm text-gray-200">{{.Name}}</strong>
+        <time class="text-xs text-gray-500">{{.Time.Format "2006-01-02 15:04:05"}}</time>
+      </div>
+      <pre class="mt-2 overflow-x-auto rounded bg-surface-2 px-3 py-2 text-xs text-gray-300">{{printf "%s" .Payload}}</pre>
+    </div>
+  {{end}}
+</div>
+{{end}}
