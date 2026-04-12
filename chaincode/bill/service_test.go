@@ -514,6 +514,26 @@ func TestCollectingCannotSignAfterDraft(t *testing.T) {
 	}
 }
 
+func TestCollectingThreshold1EnrollsEligibleVoters(t *testing.T) {
+	svc, _ := newTestService()
+	creator := NewInvoker("initiator", []string{"ES"})
+	eligible := []string{"alice", "bob", "carol"}
+	// threshold=1: the creator's auto-signature immediately advances to draft,
+	// and eligible voters must be enrolled at that point.
+	if err := svc.CreateCollectingBill(creator, 1, "PET-V", "QmV", "instant", "ES:*", "0.5", "YES", "NO", 1, eligible); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	b, _ := svc.GetBill("PET-V")
+	if b.Status != StatusDraft {
+		t.Fatalf("expected draft, got %s", b.Status)
+	}
+	for _, uid := range eligible {
+		if !b.Roles[uid].Has(RoleVoter) {
+			t.Fatalf("expected %s to have VOTER role after threshold-1 advance", uid)
+		}
+	}
+}
+
 func TestCollectingBillsAppearInListBills(t *testing.T) {
 	svc, _ := newTestService()
 	u := NewInvoker("u1", []string{"ES:PROPOSER"})
