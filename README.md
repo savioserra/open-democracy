@@ -313,7 +313,7 @@ would carry, and the Service makes its authorization decisions on that.
 |-----------------|--------------|------------------------------------------|
 | `GATEWAY_ADDR`  | `:8080`      | Listen address                           |
 | `GATEWAY_DATA`  | `./data`     | Directory for `ledger.json` persistence  |
-| `GATEWAY_USER`  | `ada`        | Default acting user                      |
+| `GATEWAY_USER`  | `savio`      | Default acting user                      |
 
 When a Fabric CA is available, set these to issue real X.509 certificates:
 

@@ -126,8 +126,16 @@ func (m participantsModel) saveEntry() (participantsModel, tea.Cmd) {
 		m.message = errStyle.Render("Write error: " + err.Error())
 		return m, nil
 	}
-	f.WriteString(line)
-	f.Close()
+	_, writeErr := f.WriteString(line)
+	closeErr := f.Close()
+	if writeErr != nil {
+		m.message = errStyle.Render("Write error: " + writeErr.Error())
+		return m, nil
+	}
+	if closeErr != nil {
+		m.message = errStyle.Render("Write error: " + closeErr.Error())
+		return m, nil
+	}
 
 	m.message = successStyle.Render(fmt.Sprintf("✓ Added %s", id))
 	m.mode = pmList
