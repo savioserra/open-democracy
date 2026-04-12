@@ -162,11 +162,12 @@ func TestVotingFlowEndToEnd(t *testing.T) {
 		t.Fatalf("receipt mismatch: %+v", r)
 	}
 	// Try ending too early
-	if err := svc.EndVote(owner, 150, "B1", electorate); err == nil {
+	electorateIDs := []string{"owner", "v1", "v2", "v3"}
+	if err := svc.EndVote(owner, 150, "B1", electorateIDs); err == nil {
 		t.Fatal("expected end vote too early error")
 	}
-	// End after window
-	if err := svc.EndVote(owner, 999, "B1", electorate); err != nil {
+	// End after window — delegations resolved automatically
+	if err := svc.EndVote(owner, 999, "B1", electorateIDs); err != nil {
 		t.Fatalf("end vote: %v", err)
 	}
 	b, _ = svc.GetBill("B1")
@@ -244,6 +245,122 @@ func TestListBillsReturnsAll(t *testing.T) {
 	}
 	if len(bills) != 3 {
 		t.Fatalf("expected 3 bills, got %d", len(bills))
+	}
+}
+
+// ── Delegation / Liquid Democracy tests ─────────────────────────────────
+
+func TestDelegationBasic(t *testing.T) {
+	svc, sink := newTestService()
+	alice := NewInvoker("alice", []string{"ES:UNION"})
+	if err := svc.Delegate(alice, 1, "bob", "ES:UNION:*"); err != nil {
+		t.Fatalf("delegate: %v", err)
+	}
+	d, err := svc.GetDelegation("alice", "ES:UNION:*")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if d.Delegatee != "bob" {
+		t.Fatalf("expected bob, got %s", d.Delegatee)
+	}
+	if !contains(sink.names(), "DelegationCreated") {
+		t.Fatal("expected DelegationCreated event")
+	}
+}
+
+func TestDelegationRejectsCycle(t *testing.T) {
+	svc, _ := newTestService()
+	alice := NewInvoker("alice", []string{"ES"})
+	bob := NewInvoker("bob", []string{"ES"})
+	_ = svc.Delegate(alice, 1, "bob", "ES:*")
+	if err := svc.Delegate(bob, 2, "alice", "ES:*"); err == nil {
+		t.Fatal("expected cycle detection error")
+	}
+}
+
+func TestDelegationTransitiveWeight(t *testing.T) {
+	svc, _ := newTestService()
+	// alice → bob → carol (chain). carol votes YES, dave votes NO.
+	// carol should get weight 3 (herself + bob + alice), dave weight 1.
+	// YES=3, NO=1 → executed.
+	carol := NewInvoker("carol", []string{"ES:UNION:PROPOSER"})
+	dave := NewInvoker("dave", []string{"ES:UNION"})
+
+	_ = svc.Delegate(NewInvoker("alice", []string{"ES:UNION"}), 1, "bob", "ES:UNION:*")
+	_ = svc.Delegate(NewInvoker("bob", []string{"ES:UNION"}), 2, "carol", "ES:UNION:*")
+
+	_ = svc.CreateBill(carol, 10, "B1", "Qm", "v", "0.25", "ES:UNION:*", "YES", "NO")
+	if _, err := svc.VoteOnVersion(carol, 11, "B1", "0", "YES", 4); err != nil {
+		t.Fatalf("version vote: %v", err)
+	}
+	if err := svc.SubmitBill(carol, "B1", "100", "100", 4); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	if _, err := svc.CastVote(carol, 150, "B1", "YES"); err != nil {
+		t.Fatalf("carol cast: %v", err)
+	}
+	if _, err := svc.CastVote(dave, 150, "B1", "NO"); err != nil {
+		t.Fatalf("dave cast: %v", err)
+	}
+	electorate := []string{"alice", "bob", "carol", "dave"}
+	if err := svc.EndVote(carol, 999, "B1", electorate); err != nil {
+		t.Fatalf("end: %v", err)
+	}
+	b, _ := svc.GetBill("B1")
+	if b.Status != StatusExecuted {
+		t.Fatalf("expected executed (YES=3 via delegation vs NO=1), got %s", b.Status)
+	}
+}
+
+func TestDelegationOverriddenByDirectVote(t *testing.T) {
+	// Alice delegates to Bob, but then votes directly. Her direct vote
+	// should count — Bob should NOT get her weight.
+	svc, _ := newTestService()
+	alice := NewInvoker("alice", []string{"ES:UNION"})
+	bob := NewInvoker("bob", []string{"ES:UNION"})
+	carol := NewInvoker("carol", []string{"ES:UNION:PROPOSER"})
+
+	_ = svc.Delegate(alice, 1, "bob", "ES:UNION:*")
+	_ = svc.CreateBill(carol, 10, "B1", "Qm", "v", "0.25", "ES:UNION:*", "YES", "NO")
+	if _, err := svc.VoteOnVersion(carol, 11, "B1", "0", "YES", 3); err != nil {
+		t.Fatalf("version vote: %v", err)
+	}
+	if err := svc.SubmitBill(carol, "B1", "100", "100", 3); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	// Both Alice and Bob vote directly
+	if _, err := svc.CastVote(alice, 150, "B1", "NO"); err != nil {
+		t.Fatalf("alice cast: %v", err)
+	}
+	if _, err := svc.CastVote(bob, 150, "B1", "YES"); err != nil {
+		t.Fatalf("bob cast: %v", err)
+	}
+
+	electorate := []string{"alice", "bob", "carol"}
+	weights, absence := svc.ResolveDelegatedWeight("ES:UNION:*", map[string]Vote{
+		"alice": {Choice: ChoiceNo},
+		"bob":   {Choice: ChoiceYes},
+	}, electorate)
+	// Alice voted directly → weight 1, Bob voted → weight 1 (no delegation absorbed)
+	// Carol didn't vote → absent
+	if weights["alice"] != 1 || weights["bob"] != 1 {
+		t.Fatalf("expected alice=1 bob=1, got alice=%d bob=%d", weights["alice"], weights["bob"])
+	}
+	if absence != 1 {
+		t.Fatalf("expected 1 absent (carol), got %d", absence)
+	}
+}
+
+func TestRevokeDelegation(t *testing.T) {
+	svc, _ := newTestService()
+	alice := NewInvoker("alice", []string{"ES"})
+	_ = svc.Delegate(alice, 1, "bob", "ES:*")
+	if err := svc.RevokeDelegation(alice, "ES:*"); err != nil {
+		t.Fatalf("revoke: %v", err)
+	}
+	d, _ := svc.GetDelegation("alice", "ES:*")
+	if d != nil {
+		t.Fatal("expected nil after revoke")
 	}
 }
 

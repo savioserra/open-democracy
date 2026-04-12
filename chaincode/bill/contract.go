@@ -108,7 +108,9 @@ func (c *BillContract) CastVote(ctx contractapi.TransactionContextInterface, bil
 
 // EndVote finalizes the vote. electorate is the in-scope participant count
 // at close time.
-func (c *BillContract) EndVote(ctx contractapi.TransactionContextInterface, billID, electorate string) error {
+// EndVote finalizes the vote. electorateCSV is a comma-separated list of
+// in-scope participant IDs used for delegation resolution and ABSENCE.
+func (c *BillContract) EndVote(ctx contractapi.TransactionContextInterface, billID, electorateCSV string) error {
 	caller, err := GetInvoker(ctx)
 	if err != nil {
 		return err
@@ -117,11 +119,8 @@ func (c *BillContract) EndVote(ctx contractapi.TransactionContextInterface, bill
 	if err != nil {
 		return err
 	}
-	n, err := strconv.Atoi(electorate)
-	if err != nil || n < 0 {
-		return fmt.Errorf("invalid electorate: %s", electorate)
-	}
-	return c.service(ctx).EndVote(caller, now, billID, n)
+	ids := splitCSV(electorateCSV)
+	return c.service(ctx).EndVote(caller, now, billID, ids)
 }
 
 // SetBillScope updates the scope of a bill.

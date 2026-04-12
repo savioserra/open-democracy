@@ -119,7 +119,28 @@ type VoteReceipt struct {
     Timestamp int64  `json:"timestamp"`
 }
 
-// Criteria controls how votes are interpreted to decide outcome.
+// Delegation represents a liquid-democracy delegation. A delegator gives
+// their voting weight to a delegatee for a specific scope. The delegation
+// is:
+//   - Scope-specific: delegating at OPENDEMOCRACY:CORE does not delegate at
+//     OPENDEMOCRACY:COMMUNITY.
+//   - Revocable at any time: the delegator can always take their vote back.
+//   - Overridable: if the delegator votes directly on a bill, the delegation
+//     is bypassed for that bill — direct participation always wins.
+//   - Transitive: if Alice delegates to Bob and Bob delegates to Carol,
+//     Carol votes with weight 3 (herself + Bob + Alice). If Bob votes
+//     directly, he gets weight 2 (himself + Alice) and Carol gets 1.
+//
+// This mirrors the Brazilian constitutional model (Art. 1, sole paragraph:
+// "All power emanates from the people, who exercise it through elected
+// representatives or directly") — citizens always retain the right to vote
+// directly, but can choose representation when they prefer.
+type Delegation struct {
+    Delegator string `json:"delegator"`
+    Delegatee string `json:"delegatee"`
+    Scope     string `json:"scope"`
+    Timestamp int64  `json:"timestamp"`
+}
 // ExecuteMask: choices counted toward execution; RejectMask: counted toward rejection.
 // ABSENCE can be included to treat non-voters as one of the sides.
 type Criteria struct {

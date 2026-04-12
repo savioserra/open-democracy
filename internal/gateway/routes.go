@@ -15,10 +15,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /entities", s.handleEntitiesPage)
 	s.mux.HandleFunc("GET /events", s.handleEventsPage)
 
+	s.mux.HandleFunc("GET /delegations", s.handleDelegationsPage)
+
 	s.mux.HandleFunc("GET /petitions", s.handlePetitionsPage)
 	s.mux.HandleFunc("GET /petitions/{id}", s.handlePetitionPage)
 
 	// HTML form actions (the dashboard posts plain forms; we redirect back).
+	s.mux.HandleFunc("POST /actions/delegate", s.handleFormDelegate)
+	s.mux.HandleFunc("POST /actions/revoke-delegation", s.handleFormRevokeDelegation)
 	s.mux.HandleFunc("POST /actions/create-petition", s.handleFormCreatePetition)
 	s.mux.HandleFunc("POST /actions/sign-petition", s.handleFormSignPetition)
 	s.mux.HandleFunc("POST /actions/create-bill", s.handleFormCreateBill)
@@ -40,6 +44,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/bills/{id}/submit", s.handleAPISubmit)
 	s.mux.HandleFunc("POST /api/bills/{id}/votes", s.handleAPICastVote)
 	s.mux.HandleFunc("POST /api/bills/{id}/end", s.handleAPIEndVote)
+	s.mux.HandleFunc("GET /api/delegations", s.handleAPIListDelegations)
+	s.mux.HandleFunc("POST /api/delegations", s.handleAPIDelegate)
+	s.mux.HandleFunc("DELETE /api/delegations/{user}/{scope}", s.handleAPIRevokeDelegation)
 	s.mux.HandleFunc("GET /api/petitions", s.handleAPIListPetitions)
 	s.mux.HandleFunc("POST /api/petitions", s.handleAPICreatePetition)
 	s.mux.HandleFunc("GET /api/petitions/{id}", s.handleAPIGetPetition)

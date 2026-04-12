@@ -155,7 +155,8 @@ func seedSampleBills(reg *Registry, svc *bill.Service) error {
 			return fmt.Errorf("seed %s cast PROP-001: %w", v.id, err)
 		}
 	}
-	if err := svc.EndVote(savio.Invoker(), now-2600, "PROP-001", coreElectorate); err != nil {
+	coreIDs := []string{"savio", "alice", "bob", "carol", "dave", "eve"}
+	if err := svc.EndVote(savio.Invoker(), now-2600, "PROP-001", coreIDs); err != nil {
 		return fmt.Errorf("seed end PROP-001: %w", err)
 	}
 
@@ -241,7 +242,34 @@ func seedSampleBills(reg *Registry, svc *bill.Service) error {
 		return fmt.Errorf("seed dave cast PROP-005: %w", err)
 	}
 
-	_ = communityElectorate // used by PROP-004 if votes were added
+	// ── Delegations (Liquid Democracy) ───────────────────────────────
+	//
+	// Brazilian Constitution, Art. 1, sole paragraph: "All power emanates
+	// from the people, who exercise it through elected representatives or
+	// directly." The delegation model implements this dual path: every
+	// participant retains the right to vote directly, but can choose to
+	// delegate to a trusted representative.
+	//
+	// Seeded delegations:
+	// - Eve delegates to Alice on CORE scope (trusts her technical judgment)
+	// - Grace delegates to Frank on COMMUNITY scope (Frank is her voice)
+	// - Dave delegates to Carol on CORE scope (Carol is active, Dave is busy)
+	//
+	// These create transitive chains: if Carol delegates to Alice, Alice
+	// would vote with weight 3 on CORE bills (herself + Dave→Carol→Alice).
+	eve, _ := reg.Get("eve")
+	grace, _ := reg.Get("grace")
+	if err := svc.Delegate(eve.Invoker(), now-50, "alice", "OPENDEMOCRACY:CORE:*"); err != nil {
+		return fmt.Errorf("seed delegation eve→alice: %w", err)
+	}
+	if err := svc.Delegate(grace.Invoker(), now-40, "frank", "OPENDEMOCRACY:COMMUNITY:*"); err != nil {
+		return fmt.Errorf("seed delegation grace→frank: %w", err)
+	}
+	if err := svc.Delegate(dave.Invoker(), now-30, "carol", "OPENDEMOCRACY:CORE:*"); err != nil {
+		return fmt.Errorf("seed delegation dave→carol: %w", err)
+	}
+
+	_ = communityElectorate
 	return nil
 }
 

@@ -125,6 +125,22 @@ func (s *Server) electorateForBill(billID string) int {
 	return s.electorateForScope(b.Scope)
 }
 
+// electorateIDsForBill returns the list of participant IDs in scope for a
+// bill. Used by EndVote for delegation resolution.
+func (s *Server) electorateIDsForBill(billID string) []string {
+	b, err := s.svc.GetBill(billID)
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, p := range s.registry.List() {
+		if p.Invoker().InScope(b.Scope) {
+			out = append(out, p.ID)
+		}
+	}
+	return out
+}
+
 // callerFromRequest resolves the X-User header (or DefaultUser) into an
 // *bill.Invoker via the participant registry. It is the gateway's stand-in
 // for the X.509 certificate the chaincode would receive in a real Fabric
@@ -191,7 +207,7 @@ func parseTemplates() (map[string]*template.Template, error) {
 		"isDraft":    func(s string) bool { return s == bill.StatusDraft },
 		"slice": func(items ...string) []string { return items },
 	}
-	pages := []string{"index.html", "bill.html", "petitions.html", "petition.html", "participants.html", "entities.html", "events.html"}
+	pages := []string{"index.html", "bill.html", "delegations.html", "petitions.html", "petition.html", "participants.html", "entities.html", "events.html"}
 	out := make(map[string]*template.Template, len(pages))
 	for _, p := range pages {
 		t, err := template.New(p).Funcs(funcs).ParseFS(webFS,

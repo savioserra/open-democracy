@@ -320,8 +320,13 @@ func (s *Service) CastVote(caller *Invoker, now int64, billID, choice string) (s
 // electorate is the in-scope participant count at close time — this is the
 // denominator for quorum and the source of ABSENCE. The gateway resolves it
 // from the registry; a Fabric deployment would resolve it from the MSP.
-func (s *Service) EndVote(caller *Invoker, now int64, billID string, electorate int) error {
-	_ = caller // anyone may attempt to end the vote; the time check enforces correctness
+// EndVote finalizes the vote. electorateIDs is the list of all in-scope
+// participant IDs at close time. Delegations are resolved: participants who
+// did not vote directly but have a delegation chain leading to a voter have
+// their weight added to that voter's choice. Participants with no vote and
+// no delegation are counted as absent.
+func (s *Service) EndVote(caller *Invoker, now int64, billID string, electorateIDs []string) error {
+	_ = caller
 	b, err := s.getBill(billID)
 	if err != nil {
 		return err
@@ -332,7 +337,9 @@ func (s *Service) EndVote(caller *Invoker, now int64, billID string, electorate 
 	if now < b.VoteEnd {
 		return errors.New("voting period has not ended yet")
 	}
-	yes, no, abstain, absence := tallyVoteCounts(b.Votes, electorate)
+	electorate := len(electorateIDs)
+	weights, absence := s.ResolveDelegatedWeight(b.Scope, b.Votes, electorateIDs)
+	yes, no, abstain := tallyWeighted(b.Votes, weights)
 	participation, executeCount, rejectCount := computeParticipation(b, yes, no, abstain, absence, electorate)
 
 	if participation < b.Quorum {
@@ -432,6 +439,198 @@ func (s *Service) ListBills() ([]*Bill, error) {
 		out = append(out, &b)
 	}
 	return out, nil
+}
+
+// ── Delegations (Liquid Democracy) ─────────────────────────────────────────
+//
+// Implements the dual model from the Brazilian Constitution (Art. 1, sole
+// paragraph): "All power emanates from the people, who exercise it through
+// elected representatives or directly." Every participant retains the right
+// to vote directly on any bill. Optionally, they can delegate their vote to
+// a trusted representative for a specific scope. The delegation is revocable,
+// scope-specific, and transitive.
+
+// Delegate creates or updates a delegation for the caller's vote in the
+// given scope. If the caller already delegated in this scope, the old
+// delegation is replaced. Circular delegation chains are detected and
+// rejected.
+func (s *Service) Delegate(caller *Invoker, now int64, delegatee, scope string) error {
+	if caller == nil {
+		return errors.New("caller is required")
+	}
+	delegatee = strings.TrimSpace(delegatee)
+	if delegatee == "" {
+		return errors.New("delegatee is required")
+	}
+	if delegatee == caller.ID {
+		return errors.New("cannot delegate to yourself")
+	}
+	scope = normalizeScopePattern(scope)
+	if scope == "" {
+		return errors.New("scope is required")
+	}
+	// Detect cycles: walk the chain from the delegatee. If we ever reach
+	// the caller, it would form a cycle.
+	visited := map[string]bool{caller.ID: true}
+	current := delegatee
+	for {
+		visited[current] = true
+		d, err := s.getDelegation(current, scope)
+		if err != nil || d == nil {
+			break
+		}
+		if d.Delegatee == caller.ID {
+			return errors.New("delegation would create a cycle")
+		}
+		if visited[d.Delegatee] {
+			break
+		}
+		current = d.Delegatee
+	}
+	del := &Delegation{
+		Delegator: caller.ID,
+		Delegatee: delegatee,
+		Scope:     scope,
+		Timestamp: now,
+	}
+	if err := s.putDelegation(del); err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(map[string]any{"delegator": caller.ID, "delegatee": delegatee, "scope": scope})
+	_ = s.events.Emit("DelegationCreated", payload)
+	return nil
+}
+
+// RevokeDelegation removes the caller's delegation for the given scope.
+func (s *Service) RevokeDelegation(caller *Invoker, scope string) error {
+	if caller == nil {
+		return errors.New("caller is required")
+	}
+	scope = normalizeScopePattern(scope)
+	if scope == "" {
+		return errors.New("scope is required")
+	}
+	key := delegationKey(caller.ID, scope)
+	exists, err := s.store.Exists(key)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("no delegation for %s in scope %s", caller.ID, scope)
+	}
+	if err := s.store.Put(key, nil); err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(map[string]any{"delegator": caller.ID, "scope": scope})
+	_ = s.events.Emit("DelegationRevoked", payload)
+	return nil
+}
+
+// GetDelegation returns the delegation for a user in a scope, or nil if none.
+func (s *Service) GetDelegation(userID, scope string) (*Delegation, error) {
+	return s.getDelegation(userID, normalizeScopePattern(scope))
+}
+
+// ListDelegations returns all delegations in the store.
+func (s *Service) ListDelegations() ([]*Delegation, error) {
+	pairs, err := s.store.ScanByPrefix("DELEG|")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*Delegation, 0, len(pairs))
+	for _, kv := range pairs {
+		if len(kv.Value) == 0 {
+			continue // revoked
+		}
+		var d Delegation
+		if err := json.Unmarshal(kv.Value, &d); err != nil {
+			continue
+		}
+		out = append(out, &d)
+	}
+	return out, nil
+}
+
+// ResolveDelegatedWeight computes the effective vote weight for each voter
+// on a bill, accounting for delegations. The logic:
+//
+//  1. A participant who voted directly gets weight 1 (at minimum).
+//  2. For each participant who did NOT vote directly, walk their delegation
+//     chain until we find someone who DID vote. That voter absorbs the
+//     delegated weight.
+//  3. Participants who neither voted nor have a delegation chain leading to
+//     a voter are counted as absent.
+//
+// Returns a map from voterID → total weight (only voters who actually cast).
+func (s *Service) ResolveDelegatedWeight(billScope string, votes map[string]Vote, electorate []string) (map[string]int, int) {
+	weights := map[string]int{}
+	for voterID := range votes {
+		weights[voterID] = 1
+	}
+	absent := 0
+	for _, uid := range electorate {
+		if _, voted := votes[uid]; voted {
+			continue
+		}
+		// Walk delegation chain for this non-voter
+		representative := s.resolveDelegationChain(uid, billScope, votes)
+		if representative != "" {
+			weights[representative]++
+		} else {
+			absent++
+		}
+	}
+	return weights, absent
+}
+
+// resolveDelegationChain walks the delegation chain from uid until it finds
+// someone who actually voted, or hits a dead end / cycle. Returns the
+// voter's ID or "" if no representative voted.
+func (s *Service) resolveDelegationChain(uid, scope string, votes map[string]Vote) string {
+	visited := map[string]bool{}
+	current := uid
+	for {
+		if visited[current] {
+			return "" // cycle
+		}
+		visited[current] = true
+		d, err := s.getDelegation(current, scope)
+		if err != nil || d == nil {
+			return "" // no delegation, no vote → absent
+		}
+		if _, voted := votes[d.Delegatee]; voted {
+			return d.Delegatee // found a representative who voted
+		}
+		current = d.Delegatee
+	}
+}
+
+// delegation store helpers
+func delegationKey(userID, scope string) string {
+	return "DELEG|" + userID + "|" + scope
+}
+
+func (s *Service) getDelegation(userID, scope string) (*Delegation, error) {
+	data, err := s.store.Get(delegationKey(userID, scope))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		return nil, nil
+	}
+	var d Delegation
+	if err := json.Unmarshal(data, &d); err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
+func (s *Service) putDelegation(d *Delegation) error {
+	data, err := json.Marshal(d)
+	if err != nil {
+		return err
+	}
+	return s.store.Put(delegationKey(d.Delegator, d.Scope), data)
 }
 
 // ── Petitions ──────────────────────────────────────────────────────────────
@@ -774,6 +973,25 @@ func tallyVoteCounts(votes map[string]Vote, electorate int) (yes, no, abstain, a
 			cast = electorate
 		}
 		absence = electorate - cast
+	}
+	return
+}
+
+// tallyWeighted counts votes using delegation-resolved weights.
+func tallyWeighted(votes map[string]Vote, weights map[string]int) (yes, no, abstain int) {
+	for voterID, v := range votes {
+		w := weights[voterID]
+		if w < 1 {
+			w = 1
+		}
+		switch v.Choice {
+		case ChoiceYes:
+			yes += w
+		case ChoiceNo:
+			no += w
+		case ChoiceAbstain:
+			abstain += w
+		}
 	}
 	return
 }

@@ -109,6 +109,48 @@ func (s *Server) handleBillPage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// Delegations page.
+func (s *Server) handleDelegationsPage(w http.ResponseWriter, r *http.Request) {
+	delegations, _ := s.svc.ListDelegations()
+	dtos := make([]delegationDTO, 0, len(delegations))
+	for _, d := range delegations {
+		dtos = append(dtos, delegationDTO{Delegator: d.Delegator, Delegatee: d.Delegatee, Scope: d.Scope, Timestamp: d.Timestamp})
+	}
+	s.render(w, r, "delegations.html", pageData{
+		Title:  "Delegations",
+		Active: "delegations",
+		Data:   dtos,
+	})
+}
+
+func (s *Server) handleFormDelegate(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	_, caller, err := s.callerForForm(r)
+	if err != nil {
+		s.redirectAfterAction(w, r, "/delegations", err)
+		return
+	}
+	err = s.svc.Delegate(caller, time.Now().Unix(), r.FormValue("delegatee"), r.FormValue("scope"))
+	s.redirectAfterAction(w, r, "/delegations", err)
+}
+
+func (s *Server) handleFormRevokeDelegation(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	_, caller, err := s.callerForForm(r)
+	if err != nil {
+		s.redirectAfterAction(w, r, "/delegations", err)
+		return
+	}
+	err = s.svc.RevokeDelegation(caller, r.FormValue("scope"))
+	s.redirectAfterAction(w, r, "/delegations", err)
+}
+
 // Petitions page: list all petitions.
 func (s *Server) handlePetitionsPage(w http.ResponseWriter, r *http.Request) {
 	petitions, err := s.svc.ListPetitions()
@@ -360,8 +402,8 @@ func (s *Server) handleFormEndVote(w http.ResponseWriter, r *http.Request) {
 		s.redirectAfterAction(w, r, "/bills/"+id, err)
 		return
 	}
-	electorate := s.electorateForBill(id)
-	err = s.svc.EndVote(caller, time.Now().Unix(), id, electorate)
+	electorateIDs := s.electorateIDsForBill(id)
+	err = s.svc.EndVote(caller, time.Now().Unix(), id, electorateIDs)
 	s.redirectAfterAction(w, r, "/bills/"+id, err)
 }
 

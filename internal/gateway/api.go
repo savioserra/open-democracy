@@ -307,8 +307,66 @@ func (s *Server) handleAPIEndVote(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, err)
 		return
 	}
-	electorate := s.electorateForBill(r.PathValue("id"))
-	if err := s.svc.EndVote(caller, time.Now().Unix(), r.PathValue("id"), electorate); err != nil {
+	electorateIDs := s.electorateIDsForBill(r.PathValue("id"))
+	if err := s.svc.EndVote(caller, time.Now().Unix(), r.PathValue("id"), electorateIDs); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// Delegations ---------------------------------------------------------------
+
+type delegationDTO struct {
+	Delegator string `json:"delegator"`
+	Delegatee string `json:"delegatee"`
+	Scope     string `json:"scope"`
+	Timestamp int64  `json:"timestamp"`
+}
+
+func (s *Server) handleAPIListDelegations(w http.ResponseWriter, r *http.Request) {
+	delegations, err := s.svc.ListDelegations()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	out := make([]delegationDTO, 0, len(delegations))
+	for _, d := range delegations {
+		out = append(out, delegationDTO{Delegator: d.Delegator, Delegatee: d.Delegatee, Scope: d.Scope, Timestamp: d.Timestamp})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+type delegateRequest struct {
+	Delegatee string `json:"delegatee"`
+	Scope     string `json:"scope"`
+}
+
+func (s *Server) handleAPIDelegate(w http.ResponseWriter, r *http.Request) {
+	_, caller, err := s.callerFromRequest(r)
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, err)
+		return
+	}
+	var req delegateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if err := s.svc.Delegate(caller, time.Now().Unix(), req.Delegatee, req.Scope); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleAPIRevokeDelegation(w http.ResponseWriter, r *http.Request) {
+	_, caller, err := s.callerFromRequest(r)
+	if err != nil {
+		writeErr(w, http.StatusUnauthorized, err)
+		return
+	}
+	if err := s.svc.RevokeDelegation(caller, r.PathValue("scope")); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
