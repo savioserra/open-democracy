@@ -1,21 +1,29 @@
 {{define "content"}}
-<section class="page-header">
-  <h2>Participants</h2>
-  <p>The directory of identities the gateway can sign as. In a real Fabric deployment each entry corresponds to an X.509 certificate carrying scope claims; here it is seeded in-process for demo use.</p>
-</section>
+<div class="mb-6">
+  <h2 class="text-xl font-bold">Participants</h2>
+  <p class="text-sm text-gray-400">The directory of identities the gateway can sign as. In a real Fabric deployment each entry corresponds to an X.509 certificate carrying scope claims; here it is seeded in-process for demo use.</p>
+</div>
 
-<table class="participants">
-  <thead><tr><th>ID</th><th>Display</th><th>Scope claims</th></tr></thead>
-  <tbody>
-    {{range .Data}}
-      <tr>
-        <td><code>{{.ID}}</code></td>
-        <td>{{.Display}}</td>
-        <td>
-          {{range .Claims}}<code class="claim">{{.}}</code> {{end}}
-        </td>
+<div class="overflow-x-auto rounded-lg border border-border">
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="border-b border-border bg-surface-2 text-xs uppercase tracking-wider text-gray-400">
+        <th class="px-4 py-3 text-left font-semibold">ID</th>
+        <th class="px-4 py-3 text-left font-semibold">Display</th>
+        <th class="px-4 py-3 text-left font-semibold">Scope claims</th>
       </tr>
-    {{end}}
-  </tbody>
-</table>
+    </thead>
+    <tbody class="divide-y divide-border">
+      {{range .Data}}
+        <tr class="bg-surface transition-colors hover:bg-surface-2">
+          <td class="px-4 py-3"><code class="rounded bg-surface-2 px-1.5 py-0.5 text-xs">{{.ID}}</code></td>
+          <td class="px-4 py-3 text-gray-300">{{.Display}}</td>
+          <td class="px-4 py-3">
+            {{range .Claims}}<code class="mr-1 mb-1 inline-block rounded bg-surface-2 px-1.5 py-0.5 text-xs">{{.}}</code>{{end}}
+          </td>
+        </tr>
+      {{end}}
+    </tbody>
+  </table>
+</div>
 {{end}}

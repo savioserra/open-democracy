@@ -450,3 +450,55 @@ func writeSSE(w http.ResponseWriter, ev Event) {
 	data, _ := json.Marshal(ev)
 	fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Name, data)
 }
+
+// handleTurboStreamSSE serves a Server-Sent Events stream that emits
+// <turbo-stream> HTML fragments. The dashboard's events page connects to
+// this via <turbo-stream-source src="/api/events/turbo-stream">.
+func (s *Server) handleTurboStreamSSE(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		writeErr(w, http.StatusInternalServerError, errors.New("streaming unsupported"))
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	flusher.Flush()
+
+	ch := s.broadcaster.Subscribe()
+	defer s.broadcaster.Unsubscribe(ch)
+
+	ping := time.NewTicker(15 * time.Second)
+	defer ping.Stop()
+
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case ev, ok := <-ch:
+			if !ok {
+				return
+			}
+			writeTurboStreamEvent(w, s, ev)
+			flusher.Flush()
+		case <-ping.C:
+			fmt.Fprintf(w, ": ping\n\n")
+			flusher.Flush()
+		}
+	}
+}
+
+func writeTurboStreamEvent(w http.ResponseWriter, s *Server, ev Event) {
+	var buf strings.Builder
+	if tmpl, ok := s.templates["_event_stream_item.html"]; ok {
+		_ = tmpl.ExecuteTemplate(&buf, "event-stream-item", ev)
+	}
+	html := buf.String()
+	// Each line of the SSE data field must be prefixed with "data: "
+	fmt.Fprintf(w, "event: message\n")
+	stream := fmt.Sprintf(`<turbo-stream action="prepend" target="event-list"><template>%s</template></turbo-stream>`, html)
+	for _, line := range strings.Split(stream, "\n") {
+		fmt.Fprintf(w, "data: %s\n", line)
+	}
+	fmt.Fprintf(w, "\n")
+}

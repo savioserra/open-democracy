@@ -167,6 +167,7 @@ func parseTemplates() (map[string]*template.Template, error) {
 		"isRejected": func(s string) bool { return s == bill.StatusRejected },
 		"isVoting":   func(s string) bool { return s == bill.StatusVoting },
 		"isDraft":    func(s string) bool { return s == bill.StatusDraft },
+		"slice": func(items ...string) []string { return items },
 	}
 	pages := []string{"index.html", "bill.html", "participants.html", "entities.html", "events.html"}
 	out := make(map[string]*template.Template, len(pages))
@@ -177,6 +178,15 @@ func parseTemplates() (map[string]*template.Template, error) {
 		)
 		if err != nil {
 			return nil, fmt.Errorf("parse %s: %w", p, err)
+		}
+		out[p] = t
+	}
+	// Partial templates (Turbo Stream fragments) parsed standalone, no layout.
+	partials := []string{"_event_stream_item.html"}
+	for _, p := range partials {
+		t, err := template.New(p).Funcs(funcs).ParseFS(webFS, "web/templates/"+p)
+		if err != nil {
+			return nil, fmt.Errorf("parse partial %s: %w", p, err)
 		}
 		out[p] = t
 	}

@@ -1,46 +1,89 @@
 {{define "content"}}
-<section class="page-header">
-  <h2>Bills</h2>
-  <p>The complete bill ledger as recorded in the in-process Open Democracy chaincode.</p>
-</section>
+<div class="mb-6">
+  <h2 class="text-xl font-bold">Bills</h2>
+  <p class="text-sm text-gray-400">The complete bill ledger as recorded in the in-process Open Democracy chaincode.</p>
+</div>
 
+<turbo-frame id="bills-list">
 {{$bills := .Data.Bills}}
 {{if $bills}}
-<table class="bills">
-  <thead>
-    <tr><th>ID</th><th>Status</th><th>Owner</th><th>Scope</th><th>Quorum</th><th>Versions</th><th>Voters</th><th>Agreed</th></tr>
-  </thead>
-  <tbody>
-  {{range $bills}}
-    <tr>
-      <td><a href="/bills/{{.ID}}">{{.ID}}</a></td>
-      <td><span class="status status-{{.Status}}">{{.Status}}</span></td>
-      <td>{{.Owner}}</td>
-      <td><code>{{.Scope}}</code></td>
-      <td>{{.Quorum}}</td>
-      <td>{{len .Versions}}</td>
-      <td>{{.VoterCount}}</td>
-      <td>{{if ge .AgreedVersionIndex 0}}v{{.AgreedVersionIndex}}{{else}}—{{end}}</td>
-    </tr>
-  {{end}}
-  </tbody>
-</table>
+<div class="overflow-x-auto rounded-lg border border-border">
+  <table class="w-full text-sm">
+    <thead>
+      <tr class="border-b border-border bg-surface-2 text-xs uppercase tracking-wider text-gray-400">
+        <th class="px-4 py-3 text-left font-semibold">ID</th>
+        <th class="px-4 py-3 text-left font-semibold">Status</th>
+        <th class="px-4 py-3 text-left font-semibold">Owner</th>
+        <th class="px-4 py-3 text-left font-semibold">Scope</th>
+        <th class="px-4 py-3 text-left font-semibold">Quorum</th>
+        <th class="px-4 py-3 text-left font-semibold">Versions</th>
+        <th class="px-4 py-3 text-left font-semibold">Voters</th>
+        <th class="px-4 py-3 text-left font-semibold">Agreed</th>
+      </tr>
+    </thead>
+    <tbody class="divide-y divide-border">
+    {{range $bills}}
+      <tr class="bg-surface transition-colors hover:bg-surface-2">
+        <td class="px-4 py-3"><a href="/bills/{{.ID}}" class="font-medium text-blue-400 hover:underline">{{.ID}}</a></td>
+        <td class="px-4 py-3">
+          {{if isDraft .Status}}<span class="inline-block rounded-full border border-yellow-600/50 bg-yellow-900/20 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-yellow-400">draft</span>{{end}}
+          {{if isVoting .Status}}<span class="inline-block rounded-full border border-blue-600/50 bg-blue-900/20 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-blue-400">voting</span>{{end}}
+          {{if isExecuted .Status}}<span class="inline-block rounded-full border border-green-600/50 bg-green-900/20 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-green-400">executed</span>{{end}}
+          {{if isRejected .Status}}<span class="inline-block rounded-full border border-red-600/50 bg-red-900/20 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-red-400">rejected</span>{{end}}
+        </td>
+        <td class="px-4 py-3 text-gray-300">{{.Owner}}</td>
+        <td class="px-4 py-3"><code class="rounded bg-surface-2 px-1.5 py-0.5 text-xs">{{.Scope}}</code></td>
+        <td class="px-4 py-3 text-gray-300">{{.Quorum}}</td>
+        <td class="px-4 py-3 text-gray-300">{{len .Versions}}</td>
+        <td class="px-4 py-3 text-gray-300">{{.VoterCount}}</td>
+        <td class="px-4 py-3 text-gray-300">{{if ge .AgreedVersionIndex 0}}v{{.AgreedVersionIndex}}{{else}}<span class="text-gray-500">—</span>{{end}}</td>
+      </tr>
+    {{end}}
+    </tbody>
+  </table>
+</div>
 {{else}}
-<p class="empty">No bills yet. Create one below to get started.</p>
+<p class="italic text-gray-500">No bills yet. Create one below to get started.</p>
 {{end}}
+</turbo-frame>
 
-<section class="card">
-  <h3>Create a bill</h3>
-  <form method="post" action="/actions/create-bill">
+<turbo-frame id="create-bill">
+<section class="mt-8 rounded-lg border border-border bg-surface p-6">
+  <h3 class="mb-4 text-lg font-semibold">Create a bill</h3>
+  <form method="post" action="/actions/create-bill" data-turbo-frame="_top" class="flex flex-wrap items-end gap-3">
     <input type="hidden" name="_user" value="{{.AsUser}}">
-    <label>Bill ID <input name="id" required placeholder="BILL-003"></label>
-    <label>IPFS hash <input name="ipfsHash" required placeholder="QmExampleHash"></label>
-    <label class="wide">Description <input name="description" required placeholder="Adopt new policy …"></label>
-    <label>Quorum <input name="quorum" value="0.5"></label>
-    <label>Scope <input name="scope" placeholder="ES:TEACHER_UNION:DIVISION_1:*"></label>
-    <label>Execute mask <input name="executeMask" value="YES"></label>
-    <label>Reject mask <input name="rejectMask" value="NO"></label>
-    <button type="submit">Create</button>
+    <label class="flex flex-col gap-1 text-xs text-gray-400">
+      Bill ID
+      <input name="id" required placeholder="BILL-003" class="rounded border border-border bg-surface-2 px-3 py-2 text-sm text-gray-200 outline-none placeholder:text-gray-600 focus:border-blue-500">
+    </label>
+    <label class="flex flex-col gap-1 text-xs text-gray-400">
+      IPFS hash
+      <input name="ipfsHash" required placeholder="QmExampleHash" class="rounded border border-border bg-surface-2 px-3 py-2 text-sm text-gray-200 outline-none placeholder:text-gray-600 focus:border-blue-500">
+    </label>
+    <label class="flex min-w-[250px] flex-1 flex-col gap-1 text-xs text-gray-400">
+      Description
+      <input name="description" required placeholder="Adopt new policy …" class="rounded border border-border bg-surface-2 px-3 py-2 text-sm text-gray-200 outline-none placeholder:text-gray-600 focus:border-blue-500">
+    </label>
+    <label class="flex flex-col gap-1 text-xs text-gray-400">
+      Quorum
+      <input name="quorum" value="0.5" class="w-20 rounded border border-border bg-surface-2 px-3 py-2 text-sm text-gray-200 outline-none focus:border-blue-500">
+    </label>
+    <label class="flex flex-col gap-1 text-xs text-gray-400">
+      Scope
+      <input name="scope" placeholder="ES:TEACHER_UNION:DIVISION_1:*" class="rounded border border-border bg-surface-2 px-3 py-2 text-sm text-gray-200 outline-none placeholder:text-gray-600 focus:border-blue-500">
+    </label>
+    <label class="flex flex-col gap-1 text-xs text-gray-400">
+      Execute mask
+      <input name="executeMask" value="YES" class="w-24 rounded border border-border bg-surface-2 px-3 py-2 text-sm text-gray-200 outline-none focus:border-blue-500">
+    </label>
+    <label class="flex flex-col gap-1 text-xs text-gray-400">
+      Reject mask
+      <input name="rejectMask" value="NO" class="w-24 rounded border border-border bg-surface-2 px-3 py-2 text-sm text-gray-200 outline-none focus:border-blue-500">
+    </label>
+    <button type="submit" class="rounded bg-blue-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-500">
+      Create
+    </button>
   </form>
 </section>
+</turbo-frame>
 {{end}}

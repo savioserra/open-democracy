@@ -41,6 +41,7 @@ func (s *Server) routes() {
 
 	// Server-sent events
 	s.mux.HandleFunc("GET /api/events/stream", s.handleSSE)
+	s.mux.HandleFunc("GET /api/events/turbo-stream", s.handleTurboStreamSSE)
 
 	// Static assets (CSS)
 	s.mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServerFS(s.staticFS)))

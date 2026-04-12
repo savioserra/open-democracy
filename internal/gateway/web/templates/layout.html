@@ -1,35 +1,67 @@
 {{define "layout"}}<!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{.Title}} · Open Democracy</title>
 <link rel="stylesheet" href="/static/style.css">
+<script type="module">
+  import hotwiredTurbo from 'https://cdn.jsdelivr.net/npm/@hotwired/turbo@8.0.12/dist/turbo.es2017-esm.js';
+</script>
+<meta name="turbo-prefetch" content="false">
 </head>
-<body>
-<header>
-  <h1><a href="/">Open Democracy</a></h1>
-  <nav>
-    <a href="/" class="{{if eq .Active "bills"}}active{{end}}">Bills</a>
-    <a href="/entities" class="{{if eq .Active "entities"}}active{{end}}">Entities</a>
-    <a href="/participants" class="{{if eq .Active "participants"}}active{{end}}">Participants</a>
-    <a href="/events" class="{{if eq .Active "events"}}active{{end}}">Events</a>
+<body class="min-h-screen font-sans leading-relaxed antialiased">
+
+<header class="sticky top-0 z-50 flex flex-wrap items-center gap-4 border-b border-border bg-surface px-6 py-3">
+  <h1 class="m-0 text-base font-bold">
+    <a href="/" class="text-gray-100 no-underline hover:text-white" data-turbo-frame="_top">Open Democracy</a>
+  </h1>
+  <nav class="flex flex-1 gap-1">
+    {{$active := .Active}}
+    {{range $name := slice "bills" "entities" "participants" "events"}}
+      {{$href := "/"}}{{if ne $name "bills"}}{{$href = (printf "/%s" $name)}}{{end}}
+      <a href="{{$href}}"
+         data-turbo-frame="_top"
+         class="rounded px-3 py-1 text-sm transition-colors
+                {{if eq $name $active}}bg-surface-2 text-white{{else}}text-gray-400 hover:bg-surface-2 hover:text-gray-200{{end}}">
+        {{if eq $name "bills"}}Bills{{end}}
+        {{if eq $name "entities"}}Entities{{end}}
+        {{if eq $name "participants"}}Participants{{end}}
+        {{if eq $name "events"}}Events{{end}}
+      </a>
+    {{end}}
   </nav>
-  <form method="get" class="user-switch" action="">
-    <label>Acting as:
-      <select name="as" onchange="this.form.submit()">
-        {{range .Users}}
-          <option value="{{.ID}}" {{if eq .ID $.AsUser}}selected{{end}}>{{.Display}}</option>
-        {{end}}
-      </select>
-    </label>
+  <form method="get" action="" class="flex items-center gap-2 text-sm" data-turbo-frame="_top">
+    <label class="text-gray-400">Acting as:</label>
+    <select name="as"
+            onchange="this.form.requestSubmit()"
+            class="rounded border border-border bg-surface-2 px-2 py-1 text-sm text-gray-200 outline-none focus:border-blue-500">
+      {{range .Users}}
+        <option value="{{.ID}}" {{if eq .ID $.AsUser}}selected{{end}}>{{.Display}}</option>
+      {{end}}
+    </select>
   </form>
 </header>
-{{if .Flash}}<div class="flash ok">{{.Flash}}</div>{{end}}
-{{if .FlashErr}}<div class="flash err">{{.FlashErr}}</div>{{end}}
-<main>
-{{template "content" .}}
+
+{{if .Flash}}
+<div class="mx-6 mt-4 rounded-md border border-green-600/50 bg-green-900/20 px-4 py-3 text-sm text-green-400">
+  Action completed successfully.
+</div>
+{{end}}
+{{if .FlashErr}}
+<div class="mx-6 mt-4 rounded-md border border-red-600/50 bg-red-900/20 px-4 py-3 text-sm text-red-400">
+  {{.FlashErr}}
+</div>
+{{end}}
+
+<main class="mx-auto max-w-7xl px-6 py-6">
+  {{template "content" .}}
 </main>
-<footer><small>open-democracy gateway · in-process ledger · <a href="/api/health">/api/health</a></small></footer>
+
+<footer class="py-8 text-center text-xs text-gray-500">
+  open-democracy gateway · in-process ledger ·
+  <a href="/api/health" class="text-blue-400 hover:underline">/api/health</a>
+</footer>
+
 </body>
 </html>{{end}}

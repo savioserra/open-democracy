@@ -1,44 +1,54 @@
 {{define "content"}}
 {{$page := .Data}}
 {{$bill := $page.Bill}}
-<section class="page-header">
-  <h2>Bill {{$bill.ID}}</h2>
-  <p>
-    <span class="status status-{{$bill.Status}}">{{$bill.Status}}</span>
-    · owner <strong>{{$bill.Owner}}</strong>
-    · scope <code>{{$bill.Scope}}</code>
-    · quorum {{$bill.Quorum}}
-    · execute mask <code>{{$bill.ExecuteMask}}</code>
-    · reject mask <code>{{$bill.RejectMask}}</code>
+
+<div class="mb-6">
+  <h2 class="text-xl font-bold">Bill {{$bill.ID}}</h2>
+  <div class="mt-1 flex flex-wrap items-center gap-3 text-sm text-gray-400">
+    {{if isDraft $bill.Status}}<span class="inline-block rounded-full border border-yellow-600/50 bg-yellow-900/20 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-yellow-400">draft</span>{{end}}
+    {{if isVoting $bill.Status}}<span class="inline-block rounded-full border border-blue-600/50 bg-blue-900/20 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-blue-400">voting</span>{{end}}
+    {{if isExecuted $bill.Status}}<span class="inline-block rounded-full border border-green-600/50 bg-green-900/20 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-green-400">executed</span>{{end}}
+    {{if isRejected $bill.Status}}<span class="inline-block rounded-full border border-red-600/50 bg-red-900/20 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-red-400">rejected</span>{{end}}
+    <span>owner <strong class="text-gray-200">{{$bill.Owner}}</strong></span>
+    <span>scope <code class="rounded bg-surface-2 px-1.5 py-0.5 text-xs">{{$bill.Scope}}</code></span>
+    <span>quorum <strong class="text-gray-200">{{$bill.Quorum}}</strong></span>
+    <span>execute <code class="rounded bg-surface-2 px-1.5 py-0.5 text-xs">{{$bill.ExecuteMask}}</code></span>
+    <span>reject <code class="rounded bg-surface-2 px-1.5 py-0.5 text-xs">{{$bill.RejectMask}}</code></span>
     {{if isVoting $bill.Status}}
-      · window {{formatTime $bill.VoteStart}} → {{formatTime $bill.VoteEnd}}
+      <span>window {{formatTime $bill.VoteStart}} → {{formatTime $bill.VoteEnd}}</span>
     {{end}}
-  </p>
-</section>
+  </div>
+</div>
 
-<div class="grid">
+<div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
 
-  <section class="card">
-    <h3>Versions ({{len $bill.Versions}})</h3>
+  {{/* ── Versions ─────────────────────────────────────────────── */}}
+  <turbo-frame id="versions" class="rounded-lg border border-border bg-surface p-5">
+    <h3 class="mb-3 text-base font-semibold">Versions ({{len $bill.Versions}})</h3>
     {{if $bill.Versions}}
-    <ol class="versions" start="0">
+    <ol class="space-y-3 pl-5 text-sm" start="0">
       {{range $i, $v := $bill.Versions}}
-      <li class="{{if eq $i $bill.AgreedVersionIndex}}agreed{{end}}">
-        <div class="version-header">
-          <strong>v{{$i}}</strong> · <code>{{$v.IPFSHash}}</code> · {{formatTime $v.Timestamp}} · by {{$v.Editor}}
-          {{if eq $i $bill.AgreedVersionIndex}}<span class="badge">AGREED</span>{{end}}
+      <li class="rounded p-3 {{if eq $i $bill.AgreedVersionIndex}}border border-dashed border-green-600/50 bg-green-900/10{{else}}bg-surface-2{{end}}">
+        <div class="flex items-center gap-2 text-xs text-gray-400">
+          <strong class="text-gray-200">v{{$i}}</strong>
+          <code class="rounded bg-[#0e1116] px-1.5 py-0.5">{{$v.IPFSHash}}</code>
+          <span>{{formatTime $v.Timestamp}}</span>
+          <span>by {{$v.Editor}}</span>
+          {{if eq $i $bill.AgreedVersionIndex}}
+            <span class="rounded bg-green-600 px-2 py-0.5 text-[10px] font-bold uppercase text-white">AGREED</span>
+          {{end}}
         </div>
-        <p>{{$v.Description}}</p>
-        <div class="version-votes">
-          <strong>Per-version votes:</strong>
+        <p class="mt-1 text-gray-300">{{$v.Description}}</p>
+        <div class="mt-2 text-xs">
+          <strong class="text-gray-400">Per-version votes:</strong>
           {{if $v.Votes}}
-            <ul>
+            <ul class="mt-1 space-y-0.5 pl-4">
               {{range $voter, $vote := $v.Votes}}
-                <li>{{$voter}} → {{$vote.Choice}} ({{formatTime $vote.Timestamp}})</li>
+                <li class="text-gray-300">{{$voter}} → <span class="font-medium">{{$vote.Choice}}</span> <span class="text-gray-500">({{formatTime $vote.Timestamp}})</span></li>
               {{end}}
             </ul>
           {{else}}
-            <em>none yet</em>
+            <em class="text-gray-500">none yet</em>
           {{end}}
         </div>
       </li>
@@ -47,101 +57,139 @@
     {{end}}
 
     {{if isDraft $bill.Status}}
-    <form method="post" action="/actions/edit-bill" class="inline">
+    <form method="post" action="/actions/edit-bill" data-turbo-frame="_top" class="mt-4 flex flex-wrap items-end gap-2 border-t border-dashed border-border pt-4">
       <input type="hidden" name="_user" value="{{$.AsUser}}">
       <input type="hidden" name="billId" value="{{$bill.ID}}">
-      <label>New IPFS hash <input name="ipfsHash" required placeholder="QmNew"></label>
-      <label class="wide">Description <input name="description" required></label>
-      <button type="submit">Add version</button>
+      <label class="flex flex-col gap-1 text-xs text-gray-400">
+        New IPFS hash
+        <input name="ipfsHash" required placeholder="QmNew" class="rounded border border-border bg-surface-2 px-2 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500">
+      </label>
+      <label class="flex min-w-[150px] flex-1 flex-col gap-1 text-xs text-gray-400">
+        Description
+        <input name="description" required class="rounded border border-border bg-surface-2 px-2 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500">
+      </label>
+      <button type="submit" class="rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-500">Add version</button>
     </form>
     {{end}}
-  </section>
+  </turbo-frame>
 
-  <section class="card">
-    <h3>Roles ({{len $bill.Roles}})</h3>
+  {{/* ── Roles ────────────────────────────────────────────────── */}}
+  <turbo-frame id="roles" class="rounded-lg border border-border bg-surface p-5">
+    <h3 class="mb-3 text-base font-semibold">Roles ({{len $bill.Roles}})</h3>
     {{if $bill.Roles}}
-    <table>
-      <thead><tr><th>User</th><th>Roles</th></tr></thead>
-      <tbody>
-        {{range $user, $role := $bill.Roles}}
-          <tr><td>{{$user}}</td><td><code>{{$role}}</code></td></tr>
-        {{end}}
-      </tbody>
-    </table>
-    {{else}}<p class="empty">No roles assigned yet.</p>{{end}}
+    <div class="overflow-x-auto rounded border border-border">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-border bg-surface-2 text-xs uppercase tracking-wider text-gray-400">
+            <th class="px-3 py-2 text-left font-semibold">User</th>
+            <th class="px-3 py-2 text-left font-semibold">Roles</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-border">
+          {{range $user, $role := $bill.Roles}}
+            <tr>
+              <td class="px-3 py-2 text-gray-300">{{$user}}</td>
+              <td class="px-3 py-2"><code class="text-xs">{{$role}}</code></td>
+            </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{else}}<p class="text-sm italic text-gray-500">No roles assigned yet.</p>{{end}}
 
-    <form method="post" action="/actions/assign-role" class="inline">
+    <form method="post" action="/actions/assign-role" data-turbo-frame="_top" class="mt-4 flex flex-wrap items-end gap-2 border-t border-dashed border-border pt-4">
       <input type="hidden" name="_user" value="{{$.AsUser}}">
       <input type="hidden" name="billId" value="{{$bill.ID}}">
-      <label>User
-        <select name="userId">
+      <label class="flex flex-col gap-1 text-xs text-gray-400">
+        User
+        <select name="userId" class="rounded border border-border bg-surface-2 px-2 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500">
           {{range $page.EligibleParticipants}}
             <option value="{{.ID}}">{{.Display}}</option>
           {{end}}
         </select>
       </label>
-      <label>Role <input name="role" placeholder="VOTER|EDITOR" value="VOTER"></label>
-      <button type="submit">Assign</button>
+      <label class="flex flex-col gap-1 text-xs text-gray-400">
+        Role
+        <input name="role" placeholder="VOTER|EDITOR" value="VOTER" class="w-32 rounded border border-border bg-surface-2 px-2 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500">
+      </label>
+      <button type="submit" class="rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-500">Assign</button>
     </form>
-  </section>
+  </turbo-frame>
 
-  <section class="card">
-    <h3>Formal votes ({{len $bill.Votes}})</h3>
+  {{/* ── Formal votes ─────────────────────────────────────────── */}}
+  <turbo-frame id="formal-votes" class="rounded-lg border border-border bg-surface p-5">
+    <h3 class="mb-3 text-base font-semibold">Formal votes ({{len $bill.Votes}})</h3>
     {{if $bill.Votes}}
-    <ul>
+    <ul class="space-y-1 pl-4 text-sm">
       {{range $voter, $vote := $bill.Votes}}
-        <li>{{$voter}} → {{$vote.Choice}} ({{formatTime $vote.Timestamp}})</li>
+        <li class="text-gray-300">{{$voter}} → <span class="font-medium">{{$vote.Choice}}</span> <span class="text-gray-500">({{formatTime $vote.Timestamp}})</span></li>
       {{end}}
     </ul>
-    {{else}}<p class="empty">No formal votes yet.</p>{{end}}
-  </section>
+    {{else}}<p class="text-sm italic text-gray-500">No formal votes yet.</p>{{end}}
+  </turbo-frame>
 
-  <section class="card">
-    <h3>Actions</h3>
+  {{/* ── Actions ──────────────────────────────────────────────── */}}
+  <turbo-frame id="actions" class="rounded-lg border border-border bg-surface p-5">
+    <h3 class="mb-3 text-base font-semibold">Actions</h3>
 
     {{if isDraft $bill.Status}}
-      <form method="post" action="/actions/version-vote" class="inline">
+      <form method="post" action="/actions/version-vote" data-turbo-frame="_top" class="flex flex-wrap items-end gap-2 border-b border-dashed border-border pb-4">
         <input type="hidden" name="_user" value="{{$.AsUser}}">
         <input type="hidden" name="billId" value="{{$bill.ID}}">
-        <label>Version index <input name="versionIndex" value="0"></label>
-        <label>Choice
-          <select name="choice"><option>YES</option><option>NO</option><option>ABSTAIN</option></select>
+        <label class="flex flex-col gap-1 text-xs text-gray-400">
+          Version index
+          <input name="versionIndex" value="0" class="w-16 rounded border border-border bg-surface-2 px-2 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500">
         </label>
-        <button type="submit">Vote on version</button>
+        <label class="flex flex-col gap-1 text-xs text-gray-400">
+          Choice
+          <select name="choice" class="rounded border border-border bg-surface-2 px-2 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500">
+            <option>YES</option><option>NO</option><option>ABSTAIN</option>
+          </select>
+        </label>
+        <button type="submit" class="rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-500">Vote on version</button>
       </form>
 
-      <form method="post" action="/actions/submit-bill" class="inline">
+      <form method="post" action="/actions/submit-bill" data-turbo-frame="_top" class="mt-4 flex flex-wrap items-end gap-2">
         <input type="hidden" name="_user" value="{{$.AsUser}}">
         <input type="hidden" name="billId" value="{{$bill.ID}}">
-        <label>Start (epoch s) <input name="startTime" placeholder="now"></label>
-        <label>Duration (s) <input name="duration" value="60"></label>
-        <button type="submit">Open voting window</button>
+        <label class="flex flex-col gap-1 text-xs text-gray-400">
+          Start (epoch s)
+          <input name="startTime" placeholder="now" class="w-28 rounded border border-border bg-surface-2 px-2 py-1.5 text-sm text-gray-200 outline-none placeholder:text-gray-600 focus:border-blue-500">
+        </label>
+        <label class="flex flex-col gap-1 text-xs text-gray-400">
+          Duration (s)
+          <input name="duration" value="60" class="w-20 rounded border border-border bg-surface-2 px-2 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500">
+        </label>
+        <button type="submit" class="rounded bg-amber-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-amber-500">Open voting window</button>
       </form>
     {{end}}
 
     {{if isVoting $bill.Status}}
-      <form method="post" action="/actions/cast-vote" class="inline">
+      <form method="post" action="/actions/cast-vote" data-turbo-frame="_top" class="flex flex-wrap items-end gap-2 border-b border-dashed border-border pb-4">
         <input type="hidden" name="_user" value="{{$.AsUser}}">
         <input type="hidden" name="billId" value="{{$bill.ID}}">
-        <label>Choice
-          <select name="choice"><option>YES</option><option>NO</option><option>ABSTAIN</option></select>
+        <label class="flex flex-col gap-1 text-xs text-gray-400">
+          Choice
+          <select name="choice" class="rounded border border-border bg-surface-2 px-2 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500">
+            <option>YES</option><option>NO</option><option>ABSTAIN</option>
+          </select>
         </label>
-        <button type="submit">Cast formal vote</button>
+        <button type="submit" class="rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-500">Cast formal vote</button>
       </form>
 
-      <form method="post" action="/actions/end-vote" class="inline">
+      <form method="post" action="/actions/end-vote" data-turbo-frame="_top" class="mt-4">
         <input type="hidden" name="_user" value="{{$.AsUser}}">
         <input type="hidden" name="billId" value="{{$bill.ID}}">
-        <button type="submit">End vote</button>
+        <button type="submit" class="rounded bg-red-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-red-500">End vote</button>
       </form>
     {{end}}
 
     {{if or (isExecuted $bill.Status) (isRejected $bill.Status)}}
-      <p><em>Bill is finalized as <strong>{{$bill.Status}}</strong>.</em></p>
+      <p class="text-sm text-gray-400">Bill is finalized as <strong class="{{if isExecuted $bill.Status}}text-green-400{{else}}text-red-400{{end}}">{{$bill.Status}}</strong>.</p>
     {{end}}
-  </section>
+  </turbo-frame>
 
 </div>
 
-<p class="back"><a href="/">← All bills</a></p>
+<p class="mt-6"><a href="/" class="text-sm text-blue-400 hover:underline">← All bills</a></p>
 {{end}}

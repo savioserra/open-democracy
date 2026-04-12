@@ -1,5 +1,6 @@
 /bin/
 /data/
+/node_modules/
 *.test
 *.out
 *.log

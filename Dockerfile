@@ -8,17 +8,32 @@
 # Run:     docker run --rm -p 8080:8080 -v od-data:/data open-democracy-gateway
 
 ARG GO_VERSION=1.24
+ARG NODE_VERSION=22
 
+# -- CSS build stage ----------------------------------------------------------
+FROM node:${NODE_VERSION}-bookworm-slim AS css
+WORKDIR /src
+COPY package.json package-lock.json tailwind.config.js ./
+RUN npm ci --ignore-scripts
+COPY internal/gateway/web internal/gateway/web
+RUN npx tailwindcss \
+      -i internal/gateway/web/static/input.css \
+      -o internal/gateway/web/static/style.css \
+      --minify
+
+# -- Go build stage -----------------------------------------------------------
 FROM golang:${GO_VERSION}-bookworm AS build
 WORKDIR /src
 
-# Cache modules separately so source-only edits don't refetch dependencies.
+# Cache Go modules separately so source-only edits don't refetch dependencies.
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     go mod download
 
 COPY . .
+# Overwrite the CSS with the production Tailwind output from the CSS stage.
+COPY --from=css /src/internal/gateway/web/static/style.css internal/gateway/web/static/style.css
 
 # Build a fully-static binary so the runtime image can be distroless static.
 RUN --mount=type=cache,target=/go/pkg/mod \
@@ -26,6 +41,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -trimpath -ldflags="-s -w" -o /out/gateway ./cmd/gateway
 
+# -- Runtime image ------------------------------------------------------------
 FROM gcr.io/distroless/static-debian12:nonroot AS runtime
 WORKDIR /app
 COPY --from=build /out/gateway /app/gateway

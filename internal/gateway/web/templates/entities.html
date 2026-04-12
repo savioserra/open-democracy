@@ -1,35 +1,36 @@
 {{define "content"}}
-<section class="page-header">
-  <h2>Entities</h2>
-  <p>Top-level scope segments derived from bills and participant claims. This is the federation view of the polity — each entity groups the bills it owns and the participants whose claims sit under it.</p>
-</section>
+<div class="mb-6">
+  <h2 class="text-xl font-bold">Entities</h2>
+  <p class="text-sm text-gray-400">Top-level scope segments derived from bills and participant claims. This is the federation view of the polity — each entity groups the bills it owns and the participants whose claims sit under it.</p>
+</div>
 
 {{if .Data}}
-<div class="grid">
+<div class="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
   {{range .Data}}
-    <section class="card">
-      <h3>{{.Name}}</h3>
-      <h4>Bills ({{len .BillIDs}})</h4>
-      {{if .BillIDs}}
-        <ul>
-          {{range .BillIDs}}
-            <li><a href="/bills/{{.}}">{{.}}</a></li>
-          {{end}}
-        </ul>
-      {{else}}<p class="empty">No bills.</p>{{end}}
+    <section class="rounded-lg border border-border bg-surface p-5">
+      <h3 class="mb-3 text-base font-semibold">{{.Name}}</h3>
 
-      <h4>Participants ({{len .Participants}})</h4>
-      {{if .Participants}}
-        <ul>
-          {{range .Participants}}
-            <li><code>{{.}}</code></li>
+      <h4 class="mb-1 text-xs font-semibold uppercase tracking-wider text-gray-400">Bills ({{len .BillIDs}})</h4>
+      {{if .BillIDs}}
+        <ul class="mb-4 space-y-0.5 pl-4 text-sm">
+          {{range .BillIDs}}
+            <li><a href="/bills/{{.}}" class="text-blue-400 hover:underline">{{.}}</a></li>
           {{end}}
         </ul>
-      {{else}}<p class="empty">No participants.</p>{{end}}
+      {{else}}<p class="mb-4 text-sm italic text-gray-500">No bills.</p>{{end}}
+
+      <h4 class="mb-1 text-xs font-semibold uppercase tracking-wider text-gray-400">Participants ({{len .Participants}})</h4>
+      {{if .Participants}}
+        <ul class="space-y-0.5 pl-4 text-sm">
+          {{range .Participants}}
+            <li><code class="text-xs">{{.}}</code></li>
+          {{end}}
+        </ul>
+      {{else}}<p class="text-sm italic text-gray-500">No participants.</p>{{end}}
     </section>
   {{end}}
 </div>
 {{else}}
-<p class="empty">No entities yet — create a bill with a scope to populate this view.</p>
+<p class="italic text-gray-500">No entities yet — create a bill with a scope to populate this view.</p>
 {{end}}
 {{end}}
