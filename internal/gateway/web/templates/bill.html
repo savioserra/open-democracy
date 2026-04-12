@@ -5,6 +5,7 @@
 <div class="mb-6">
   <h2 class="text-xl font-bold">Bill {{$bill.ID}}</h2>
   <div class="mt-1 flex flex-wrap items-center gap-3 text-sm text-gray-400">
+    {{if isCollecting $bill.Status}}<span class="inline-block rounded-full border border-amber-600/50 bg-amber-900/20 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-amber-400">collecting</span>{{end}}
     {{if isDraft $bill.Status}}<span class="inline-block rounded-full border border-yellow-600/50 bg-yellow-900/20 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-yellow-400">draft</span>{{end}}
     {{if isVoting $bill.Status}}<span class="inline-block rounded-full border border-blue-600/50 bg-blue-900/20 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-blue-400">voting</span>{{end}}
     {{if isExecuted $bill.Status}}<span class="inline-block rounded-full border border-green-600/50 bg-green-900/20 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-green-400">executed</span>{{end}}
@@ -56,7 +57,7 @@
     </ol>
     {{end}}
 
-    {{if isDraft $bill.Status}}
+    {{if or (isDraft $bill.Status) (isCollecting $bill.Status)}}
     <form method="post" action="/actions/edit-bill" data-turbo-frame="_top" class="mt-4 flex flex-wrap items-end gap-2 border-t border-dashed border-border pt-4">
       <input type="hidden" name="_user" value="{{$.AsUser}}">
       <input type="hidden" name="billId" value="{{$bill.ID}}">
@@ -68,7 +69,7 @@
         Description
         <input name="description" required class="rounded border border-border bg-surface-2 px-2 py-1.5 text-sm text-gray-200 outline-none focus:border-blue-500">
       </label>
-      <button type="submit" class="rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-500">Add version</button>
+      <button type="submit" class="rounded bg-blue-600 px-3 py-1.5 text-sm font-semibold text-white hover:bg-blue-500">Add version{{if isCollecting $bill.Status}} (resets signatures){{end}}</button>
     </form>
     {{end}}
   </turbo-frame>
@@ -127,6 +128,40 @@
     </ul>
     {{else}}<p class="text-sm italic text-gray-500">No formal votes yet.</p>{{end}}
   </turbo-frame>
+
+  {{/* ── Signatures (collecting phase) ─────────────────────────── */}}
+  {{if isCollecting $bill.Status}}
+  <section class="rounded-lg border border-border bg-surface p-5">
+    <h3 class="mb-3 text-base font-semibold">
+      Signatures
+      <span class="ml-2 font-normal text-amber-400">
+        {{$bill.SignatureCount}} / {{$bill.Threshold}}
+      </span>
+    </h3>
+
+    {{if $bill.Signatures}}
+    <ul class="space-y-1 pl-4 text-sm">
+      {{range $signer, $ts := $bill.Signatures}}
+        <li class="text-gray-300">{{$signer}} <span class="text-gray-500">({{formatTime $ts}})</span></li>
+      {{end}}
+    </ul>
+    {{else}}
+    <p class="text-sm italic text-gray-500">No signatures yet.</p>
+    {{end}}
+
+    {{if not $page.HasSigned}}
+    <form method="post" action="/actions/sign-bill" data-turbo-frame="_top" class="mt-4 border-t border-dashed border-border pt-4">
+      <input type="hidden" name="_user" value="{{$.AsUser}}">
+      <input type="hidden" name="billId" value="{{$bill.ID}}">
+      <button type="submit" class="rounded bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-500">
+        Sign this bill
+      </button>
+    </form>
+    {{else}}
+    <p class="mt-4 text-sm italic text-gray-500">You have already signed.</p>
+    {{end}}
+  </section>
+  {{end}}
 
   {{/* ── Actions ──────────────────────────────────────────────── */}}
   <turbo-frame id="actions" class="rounded-lg border border-border bg-surface p-5">

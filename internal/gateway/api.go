@@ -41,20 +41,23 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // and external API consumers, who shouldn't have to know about the bitmask
 // encoding. The internal *bill.Bill is preserved as-is on disk.
 type billDTO struct {
-	ID                 string            `json:"id"`
-	Owner              string            `json:"owner"`
-	Status             string            `json:"status"`
-	Quorum             float64           `json:"quorum"`
-	ExecuteMask        string            `json:"executeMask"`
-	RejectMask         string            `json:"rejectMask"`
-	Scope              string            `json:"scope"`
-	Versions           []versionDTO      `json:"versions"`
-	Roles              map[string]string `json:"roles"`
-	VoterCount         int               `json:"voterCount"`
+	ID                 string             `json:"id"`
+	Owner              string             `json:"owner"`
+	Status             string             `json:"status"`
+	Quorum             float64            `json:"quorum"`
+	ExecuteMask        string             `json:"executeMask"`
+	RejectMask         string             `json:"rejectMask"`
+	Scope              string             `json:"scope"`
+	Versions           []versionDTO       `json:"versions"`
+	Roles              map[string]string  `json:"roles"`
+	VoterCount         int                `json:"voterCount"`
 	Votes              map[string]voteDTO `json:"votes"`
-	VoteStart          int64             `json:"voteStart"`
-	VoteEnd            int64             `json:"voteEnd"`
-	AgreedVersionIndex int               `json:"agreedVersionIndex"`
+	VoteStart          int64              `json:"voteStart"`
+	VoteEnd            int64              `json:"voteEnd"`
+	AgreedVersionIndex int                `json:"agreedVersionIndex"`
+	Threshold          int                `json:"threshold,omitempty"`
+	Signatures         map[string]int64   `json:"signatures,omitempty"`
+	SignatureCount     int                `json:"signatureCount,omitempty"`
 }
 
 type versionDTO struct {
@@ -113,6 +116,9 @@ func toBillDTO(b *bill.Bill) billDTO {
 		VoteStart:          b.VoteStart,
 		VoteEnd:            b.VoteEnd,
 		AgreedVersionIndex: b.AgreedVersionIndex,
+		Threshold:          b.Threshold,
+		Signatures:         b.Signatures,
+		SignatureCount:     len(b.Signatures),
 	}
 }
 
@@ -141,6 +147,8 @@ func (s *Server) handleAPIGetBill(w http.ResponseWriter, r *http.Request) {
 }
 
 // createBillRequest is the JSON payload accepted by POST /api/bills.
+// When Threshold > 0 the bill starts in "collecting" status (popular
+// initiative); otherwise it starts in "draft" (requires PROPOSER/ADMIN).
 type createBillRequest struct {
 	ID          string `json:"id"`
 	IPFSHash    string `json:"ipfsHash"`
@@ -149,6 +157,7 @@ type createBillRequest struct {
 	Scope       string `json:"scope"`
 	ExecuteMask string `json:"executeMask"`
 	RejectMask  string `json:"rejectMask"`
+	Threshold   int    `json:"threshold"`
 }
 
 func (s *Server) handleAPICreateBill(w http.ResponseWriter, r *http.Request) {
@@ -167,9 +176,17 @@ func (s *Server) handleAPICreateBill(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	if err := s.svc.CreateBill(caller, time.Now().Unix(), req.ID, req.IPFSHash, req.Description, q, req.Scope, req.ExecuteMask, req.RejectMask); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
+	if req.Threshold > 0 {
+		eligible := s.eligibleVotersForScope(req.Scope)
+		if err := s.svc.CreateCollectingBill(caller, time.Now().Unix(), req.ID, req.IPFSHash, req.Description, req.Scope, q, req.ExecuteMask, req.RejectMask, req.Threshold, eligible); err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
+	} else {
+		if err := s.svc.CreateBill(caller, time.Now().Unix(), req.ID, req.IPFSHash, req.Description, q, req.Scope, req.ExecuteMask, req.RejectMask); err != nil {
+			writeErr(w, http.StatusBadRequest, err)
+			return
+		}
 	}
 	b, err := s.svc.GetBill(req.ID)
 	if err != nil {
@@ -373,110 +390,16 @@ func (s *Server) handleAPIRevokeDelegation(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// Petitions -----------------------------------------------------------------
+// Sign (collecting bills) ---------------------------------------------------
 
-type petitionDTO struct {
-	ID            string           `json:"id"`
-	Initiator     string           `json:"initiator"`
-	TargetScope   string           `json:"targetScope"`
-	IPFSHash      string           `json:"ipfsHash"`
-	Description   string           `json:"description"`
-	Quorum        float64          `json:"quorum"`
-	ExecuteMask   string           `json:"executeMask"`
-	RejectMask    string           `json:"rejectMask"`
-	Threshold     int              `json:"threshold"`
-	Signatures    map[string]int64 `json:"signatures"`
-	SignatureCount int             `json:"signatureCount"`
-	Status        string           `json:"status"`
-	CreatedBillID string           `json:"createdBillId,omitempty"`
-	Timestamp     int64            `json:"timestamp"`
-}
-
-func toPetitionDTO(p *bill.Petition) petitionDTO {
-	return petitionDTO{
-		ID:             p.ID,
-		Initiator:      p.Initiator,
-		TargetScope:    p.TargetScope,
-		IPFSHash:       p.IPFSHash,
-		Description:    p.Description,
-		Quorum:         p.Quorum,
-		ExecuteMask:    choiceName(p.Criteria.ExecuteMask),
-		RejectMask:     choiceName(p.Criteria.RejectMask),
-		Threshold:      p.Threshold,
-		Signatures:     p.Signatures,
-		SignatureCount: len(p.Signatures),
-		Status:         p.Status,
-		CreatedBillID:  p.CreatedBillID,
-		Timestamp:      p.Timestamp,
-	}
-}
-
-func (s *Server) handleAPIListPetitions(w http.ResponseWriter, r *http.Request) {
-	petitions, err := s.svc.ListPetitions()
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
-		return
-	}
-	out := make([]petitionDTO, 0, len(petitions))
-	for _, p := range petitions {
-		out = append(out, toPetitionDTO(p))
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	writeJSON(w, http.StatusOK, out)
-}
-
-func (s *Server) handleAPIGetPetition(w http.ResponseWriter, r *http.Request) {
-	p, err := s.svc.GetPetition(r.PathValue("id"))
-	if err != nil {
-		writeErr(w, http.StatusNotFound, err)
-		return
-	}
-	writeJSON(w, http.StatusOK, toPetitionDTO(p))
-}
-
-type createPetitionRequest struct {
-	ID          string `json:"id"`
-	IPFSHash    string `json:"ipfsHash"`
-	Description string `json:"description"`
-	TargetScope string `json:"targetScope"`
-	Quorum      string `json:"quorum"`
-	ExecuteMask string `json:"executeMask"`
-	RejectMask  string `json:"rejectMask"`
-	Threshold   int    `json:"threshold"`
-}
-
-func (s *Server) handleAPICreatePetition(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleAPISignBill(w http.ResponseWriter, r *http.Request) {
 	_, caller, err := s.callerFromRequest(r)
 	if err != nil {
 		writeErr(w, http.StatusUnauthorized, err)
 		return
 	}
-	var req createPetitionRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	q, err := parseQuorum(req.Quorum)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	if err := s.svc.CreatePetition(caller, time.Now().Unix(), req.ID, req.IPFSHash, req.Description, req.TargetScope, q, req.ExecuteMask, req.RejectMask, req.Threshold); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	p, _ := s.svc.GetPetition(req.ID)
-	writeJSON(w, http.StatusCreated, toPetitionDTO(p))
-}
-
-func (s *Server) handleAPISignPetition(w http.ResponseWriter, r *http.Request) {
-	_, caller, err := s.callerFromRequest(r)
-	if err != nil {
-		writeErr(w, http.StatusUnauthorized, err)
-		return
-	}
-	eligible := s.eligibleVotersForScope(r.PathValue("id"))
-	if err := s.svc.SignPetition(caller, time.Now().Unix(), r.PathValue("id"), eligible); err != nil {
+	eligible := s.eligibleVotersForBillScope(r.PathValue("id"))
+	if err := s.svc.SignBill(caller, time.Now().Unix(), r.PathValue("id"), eligible); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
@@ -484,20 +407,25 @@ func (s *Server) handleAPISignPetition(w http.ResponseWriter, r *http.Request) {
 }
 
 // eligibleVotersForScope returns all participant IDs whose scope covers the
-// petition's target scope. This is the electorate for the auto-created bill.
-func (s *Server) eligibleVotersForScope(petitionID string) []string {
-	p, err := s.svc.GetPetition(petitionID)
-	if err != nil {
-		return nil
-	}
+// given scope pattern. Used when a collecting bill transitions to draft.
+func (s *Server) eligibleVotersForScope(scope string) []string {
 	var out []string
 	for _, part := range s.registry.List() {
-		inv := part.Invoker()
-		if inv.InScope(p.TargetScope) {
+		if part.Invoker().InScope(scope) {
 			out = append(out, part.ID)
 		}
 	}
 	return out
+}
+
+// eligibleVotersForBillScope returns all participant IDs whose scope covers
+// the bill's scope. Used when a collecting bill transitions to draft.
+func (s *Server) eligibleVotersForBillScope(billID string) []string {
+	b, err := s.svc.GetBill(billID)
+	if err != nil {
+		return nil
+	}
+	return s.eligibleVotersForScope(b.Scope)
 }
 
 // Vote verification ---------------------------------------------------------

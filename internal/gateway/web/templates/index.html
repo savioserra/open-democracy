@@ -26,6 +26,7 @@
       <tr class="bg-surface transition-colors hover:bg-surface-2">
         <td class="px-4 py-3"><a href="/bills/{{.ID}}" class="font-medium text-blue-400 hover:underline">{{.ID}}</a></td>
         <td class="px-4 py-3">
+          {{if isCollecting .Status}}<span class="inline-block rounded-full border border-amber-600/50 bg-amber-900/20 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-amber-400">collecting</span>{{end}}
           {{if isDraft .Status}}<span class="inline-block rounded-full border border-yellow-600/50 bg-yellow-900/20 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-yellow-400">draft</span>{{end}}
           {{if isVoting .Status}}<span class="inline-block rounded-full border border-blue-600/50 bg-blue-900/20 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-blue-400">voting</span>{{end}}
           {{if isExecuted .Status}}<span class="inline-block rounded-full border border-green-600/50 bg-green-900/20 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-green-400">executed</span>{{end}}

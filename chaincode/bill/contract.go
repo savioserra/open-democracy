@@ -142,6 +142,42 @@ func (c *BillContract) SetBillCriteria(ctx contractapi.TransactionContextInterfa
 	return c.service(ctx).SetBillCriteria(caller, billID, executeMask, rejectMask)
 }
 
+// CreateCollectingBill creates a bill in "collecting" status (popular
+// initiative). Anyone can call this — no PROPOSER/ADMIN role required.
+// eligibleVotersCSV is a comma-separated list of participant IDs to enroll
+// as VOTER if the threshold is met immediately at creation (threshold == 1).
+func (c *BillContract) CreateCollectingBill(ctx contractapi.TransactionContextInterface, billID, ipfsHash, description, targetScope, quorum, executeMask, rejectMask, threshold, eligibleVotersCSV string) error {
+	caller, err := GetInvoker(ctx)
+	if err != nil {
+		return err
+	}
+	now, err := txTimestampSeconds(ctx)
+	if err != nil {
+		return err
+	}
+	th, err := strconv.Atoi(threshold)
+	if err != nil || th < 1 {
+		return fmt.Errorf("invalid threshold: %s", threshold)
+	}
+	eligible := splitCSV(eligibleVotersCSV)
+	return c.service(ctx).CreateCollectingBill(caller, now, billID, ipfsHash, description, targetScope, quorum, executeMask, rejectMask, th, eligible)
+}
+
+// SignBill adds a signature to a collecting-status bill. When the threshold
+// is reached, the bill transitions to draft with eligible voters enrolled.
+func (c *BillContract) SignBill(ctx contractapi.TransactionContextInterface, billID, eligibleVotersCSV string) error {
+	caller, err := GetInvoker(ctx)
+	if err != nil {
+		return err
+	}
+	now, err := txTimestampSeconds(ctx)
+	if err != nil {
+		return err
+	}
+	eligible := splitCSV(eligibleVotersCSV)
+	return c.service(ctx).SignBill(caller, now, billID, eligible)
+}
+
 // RegisterParticipant adds a participant to the on-ledger identity roster.
 // claimsCSV is a comma-separated list of scope claims.
 func (c *BillContract) RegisterParticipant(ctx contractapi.TransactionContextInterface, participantID, displayName, claimsCSV string) error {
