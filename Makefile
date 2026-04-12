@@ -16,16 +16,17 @@ GO ?= go
 BIN_DIR := bin
 DATA_DIR := data
 GATEWAY := $(BIN_DIR)/gateway
+ODCTL := $(BIN_DIR)/odctl
 CSS_INPUT := internal/gateway/web/static/input.css
 CSS_OUTPUT := internal/gateway/web/static/style.css
 TEMPLATES := $(shell find internal/gateway/web/templates -type f -name '*.html' 2>/dev/null)
 
-.PHONY: help test build run image up down logs clean tidy fmt vet css css-watch
+.PHONY: help test build run image up down logs clean tidy fmt vet css css-watch odctl
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}' || true
 	@echo ""
-	@echo "Targets: help test css css-watch build run image up down logs clean tidy fmt vet"
+	@echo "Targets: help test css css-watch build odctl run image up down logs clean tidy fmt vet"
 
 tidy: ## Run go mod tidy
 	$(GO) mod tidy
@@ -49,9 +50,15 @@ css-watch: ## Watch Tailwind CSS (dev mode, rebuild on template changes)
 
 build: css $(GATEWAY) ## Build the gateway binary
 
-$(GATEWAY): $(shell find cmd internal chaincode -type f -name '*.go' 2>/dev/null) $(CSS_OUTPUT) go.mod go.sum
+$(GATEWAY): $(shell find cmd/gateway internal/gateway chaincode -type f -name '*.go' 2>/dev/null) $(CSS_OUTPUT) go.mod go.sum
 	@mkdir -p $(BIN_DIR)
 	$(GO) build -trimpath -ldflags="-s -w" -o $(GATEWAY) ./cmd/gateway
+
+odctl: $(ODCTL) ## Build the federation TUI
+
+$(ODCTL): $(shell find cmd/odctl internal/tui -type f -name '*.go' 2>/dev/null) go.mod go.sum
+	@mkdir -p $(BIN_DIR)
+	CGO_ENABLED=0 $(GO) build -trimpath -ldflags="-s -w" -o $(ODCTL) ./cmd/odctl
 
 run: build ## Run the gateway locally with ./data persistence
 	@mkdir -p $(DATA_DIR)
