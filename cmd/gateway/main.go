@@ -39,7 +39,7 @@ func main() {
 	cfg := gateway.Config{
 		Addr:        envOr("GATEWAY_ADDR", ":8080"),
 		StorePath:   envOr("GATEWAY_DATA", "./data") + "/ledger.json",
-		DefaultUser: envOr("GATEWAY_USER", "ada"),
+		DefaultUser: envOr("GATEWAY_USER", "savio"),
 	}
 	srv, err := gateway.NewServer(cfg)
 	if err != nil {

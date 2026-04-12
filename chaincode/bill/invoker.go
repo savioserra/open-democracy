@@ -66,8 +66,8 @@ func (i *Invoker) addClaim(raw string) {
 
 // GetInvoker builds an Invoker from the transaction context attributes.
 // It reads attributes "scope" and "scopes" (CSV). Each entry can be either a
-// plain scope (e.g., "ES:TEACHER_UNION:DIVISION_2:*") or a scope with role
-// suffix (e.g., "ES:...:ADMIN"). If the last segment matches a known role
+// plain scope (e.g., "OPENDEMOCRACY:CORE:*") or a scope with role suffix
+// (e.g., "OPENDEMOCRACY:CORE:ADMIN"). If the last segment matches a known role
 // token, it is treated as the role; otherwise it's a plain scope.
 func GetInvoker(ctx contractapi.TransactionContextInterface) (*Invoker, error) {
 	id, err := cid.GetID(ctx.GetStub())
@@ -140,8 +140,8 @@ func (i *Invoker) HasAdminFor(requiredScope string) bool {
 
 // InScope checks if invoker belongs to (or is above) the required hierarchical scope.
 // Scope pattern uses ':' as the hierarchy separator and '*' wildcard per segment.
-// Example: required "ES:TEACHER_UNION:DIVISION_2:*" will be satisfied by an invoker with
-// scopes like "ES:*" or "ES:TEACHER_UNION:*" or the exact required one.
+// Example: required "OPENDEMOCRACY:CORE:TEAM_A:*" will be satisfied by an
+// invoker with scopes like "OPENDEMOCRACY:*" or "OPENDEMOCRACY:CORE:*".
 func (i *Invoker) InScope(required string) bool {
 	if i == nil {
 		return false

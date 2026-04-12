@@ -190,6 +190,9 @@ func (s *Service) VoteOnVersion(caller *Invoker, now int64, billID, versionIndex
 	if ch == ChoiceAbsence || ch == ChoiceNone {
 		return "", errors.New("invalid choice (expected YES, NO, or ABSTAIN)")
 	}
+	if _, exists := b.Versions[idx].Votes[caller.ID]; exists {
+		return "", errors.New("user has already voted on this version")
+	}
 	b.Versions[idx].Votes[caller.ID] = Vote{VoterID: caller.ID, Choice: ch, Timestamp: now}
 
 	// Generate receipt
@@ -316,10 +319,6 @@ func (s *Service) CastVote(caller *Invoker, now int64, billID, choice string) (s
 	return voteID, nil
 }
 
-// EndVote finalizes the vote, computes the outcome, and transitions status.
-// electorate is the in-scope participant count at close time — this is the
-// denominator for quorum and the source of ABSENCE. The gateway resolves it
-// from the registry; a Fabric deployment would resolve it from the MSP.
 // EndVote finalizes the vote. electorateIDs is the list of all in-scope
 // participant IDs at close time. Delegations are resolved: participants who
 // did not vote directly but have a delegation chain leading to a voter have
@@ -374,6 +373,9 @@ func (s *Service) SetBillScope(caller *Invoker, billID, scope string) error {
 	b, err := s.getBill(billID)
 	if err != nil {
 		return err
+	}
+	if b.Status != StatusDraft {
+		return errors.New("bill must be in draft status to set scope")
 	}
 	if caller.ID != b.Owner && !caller.HasRole(b, RoleProposer) {
 		return errors.New("not authorized: only owner/proposer can set scope")
@@ -447,13 +449,20 @@ func (s *Service) ListBills() ([]*Bill, error) {
 // paragraph): "All power emanates from the people, who exercise it through
 // elected representatives or directly." Every participant retains the right
 // to vote directly on any bill. Optionally, they can delegate their vote to
-// a trusted representative for a specific scope. The delegation is revocable,
-// scope-specific, and transitive.
+// a trusted representative for a specific scope.
+//
+// Delegations are depth-1 (no transitive chains), scope-specific (one
+// delegate per scope level, like the Brazilian federal model), revocable
+// at any time, and overridable by direct vote.
+//
+// References:
+//   Ford, B. (2002). "Delegative Democracy." Unpublished manuscript.
+//   Constituição da República Federativa do Brasil (1988), Art. 1,
+//     parágrafo único.
 
 // Delegate creates or updates a delegation for the caller's vote in the
 // given scope. If the caller already delegated in this scope, the old
-// delegation is replaced. Circular delegation chains are detected and
-// rejected.
+// delegation is replaced.
 func (s *Service) Delegate(caller *Invoker, now int64, delegatee, scope string) error {
 	if caller == nil {
 		return errors.New("caller is required")
@@ -997,10 +1006,16 @@ func countByMask(mask Choice, yes, no, abstain, absence int) int {
 	return total
 }
 
+// computeParticipation computes quorum participation and the execute/reject
+// counts for the criteria masks. Quorum is measured as ACTUAL participation
+// (YES + NO + ABSTAIN) divided by the electorate — ABSENCE is never counted
+// toward participation. This prevents the degenerate case where ABSENCE in
+// a criteria mask would make quorum trivially 100% even with zero voters.
+// ABSENCE only affects the execute/reject outcome AFTER quorum is met.
 func computeParticipation(b *Bill, yes, no, abstain, absence, eligible int) (participation float64, executeCount int, rejectCount int) {
-	included := b.Criteria.ExecuteMask | b.Criteria.RejectMask
 	if eligible > 0 {
-		participation = float64(countByMask(included, yes, no, abstain, absence)) / float64(eligible)
+		actualCast := yes + no + abstain
+		participation = float64(actualCast) / float64(eligible)
 	}
 	executeCount = countByMask(b.Criteria.ExecuteMask, yes, no, abstain, absence)
 	rejectCount = countByMask(b.Criteria.RejectMask, yes, no, abstain, absence)

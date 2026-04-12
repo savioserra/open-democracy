@@ -1,3 +1,61 @@
+// Package bill implements the on-ledger data model and business rules for a
+// democratic decision-making system on a permissioned blockchain.
+//
+// The design draws from several traditions in political theory:
+//
+// Deliberation and execution stages:
+//   Lenin, V. I. "Freedom to Criticise and Unity of Action." Vperyod,
+//   20 May 1906. — Democratic centralism: broad debate on draft versions
+//   (stage 1), then binding formal vote with quorum (stage 2).
+//
+// Absence as a first-class category:
+//   Marx, K. The Eighteenth Brumaire of Louis Bonaparte. 1852. — Analysis
+//   of how those absent from decision-making are acted upon rather than
+//   acting: "they cannot represent themselves, they must be represented."
+//   The ChoiceAbsence bitmask operationalises this insight.
+//
+// Polycentric governance and scope hierarchy:
+//   Ostrom, E. Governing the Commons. Cambridge UP, 1990. — Nested,
+//   locally-adapted rule systems. Each scope level can evolve its own
+//   quorum and criteria.
+//   V. Ostrom, Tiebout & Warren. "The Organization of Government in
+//   Metropolitan Areas." APSR 55(4), 1961. — Coined "polycentric."
+//
+// Liquid democracy (delegation):
+//   Ford, B. "Delegative Democracy." Unpublished manuscript, 2002. —
+//   Origin of the liquid democracy concept.
+//   Blum, C. & Zuber, C. I. "Liquid Democracy: Potentials, Problems, and
+//   Perspectives." J. Political Philosophy 24(2), 2016. — Rigorous
+//   philosophical analysis defining four properties (direct democracy,
+//   flexible delegation, meta-delegation, instant recall).
+//   Constituição da República Federativa do Brasil, 1988, Art. 1,
+//   parágrafo único — "Todo o poder emana do povo, que o exerce por
+//   meio de representantes eleitos ou diretamente."
+//
+// Popular initiative (petitions):
+//   Trechsel, A. H. & Kriesi, H. "Switzerland: The Referendum and
+//   Initiative as a Centrepiece of the Political System." In The
+//   Referendum Experience in Europe, Macmillan, 1996.
+//   Santos, B. de S. "Participatory Budgeting in Porto Alegre." Politics
+//   & Society 26(4), 1998. — Democratising democracy from below.
+//
+// Vote receipts and verifiable voting:
+//   Chaum, D. "Secret-Ballot Receipts: True Voter-Verifiable Elections."
+//   IEEE Security & Privacy 2(1), 2004.
+//   Benaloh, J. "Verifiable Secret-Ballot Elections." PhD Thesis, Yale,
+//   1987.
+//
+// Federated council structures:
+//   Lenin, V. I. The State and Revolution. 1917. — Soviet model.
+//   Bookchin, M. "Libertarian Municipalism: An Overview." 1991. —
+//   Confederation of face-to-face assemblies with mandated, recallable
+//   delegates.
+//
+// Future directions (not yet implemented):
+//   Lalley, S. P. & Weyl, E. G. "Quadratic Voting." AEA Papers and
+//   Proceedings 108, 2018. — Voice credits at quadratic cost.
+//   Zargham, M. "Social Sensor Fusion." BlockScience WP, 2018. —
+//   Conviction voting: continuous preference signalling.
 package bill
 
 import (
@@ -6,7 +64,8 @@ import (
     "strings"
 )
 
-// Status of a bill
+// Status of a bill. The lifecycle follows Lenin's democratic centralism:
+// draft (deliberation) → voting (binding decision) → executed or rejected.
 const (
     StatusDraft    = "draft"
     StatusVoting   = "voting"

@@ -255,8 +255,8 @@ func seedSampleBills(reg *Registry, svc *bill.Service) error {
 	// - Grace delegates to Frank on COMMUNITY scope (Frank is her voice)
 	// - Dave delegates to Carol on CORE scope (Carol is active, Dave is busy)
 	//
-	// These create transitive chains: if Carol delegates to Alice, Alice
-	// would vote with weight 3 on CORE bills (herself + Dave→Carol→Alice).
+	// Depth-1: each delegate must vote directly. If Carol delegates to
+	// Alice, Alice gets +1 weight — but only if Alice votes personally.
 	eve, _ := reg.Get("eve")
 	grace, _ := reg.Get("grace")
 	if err := svc.Delegate(eve.Invoker(), now-50, "alice", "OPENDEMOCRACY:CORE:*"); err != nil {
