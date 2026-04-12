@@ -1,21 +1,21 @@
 package bill
 
 import (
-    "fmt"
-    "strings"
+	"fmt"
+	"strings"
 
-    "github.com/hyperledger/fabric-chaincode-go/pkg/cid"
-    "github.com/hyperledger/fabric-contract-api-go/contractapi"
+	"github.com/hyperledger/fabric-chaincode-go/pkg/cid"
+	"github.com/hyperledger/fabric-contract-api-go/contractapi"
 )
 
 // Known authority roles encoded in scope claims (final segment)
 // Maps role token to bitwise Role value
 var authorityRoles = map[string]Role{
-    "ADMIN":    RoleAdmin,
-    "PROPOSER": RoleProposer,
-    "EDITOR":   RoleEditor,
-    "VOTER":    RoleVoter,
-    "AUDITOR":  RoleAuditor,
+	"ADMIN":    RoleAdmin,
+	"PROPOSER": RoleProposer,
+	"EDITOR":   RoleEditor,
+	"VOTER":    RoleVoter,
+	"AUDITOR":  RoleAuditor,
 }
 
 // Invoker encapsulates transaction invoker identity and attributes.
@@ -24,44 +24,44 @@ var authorityRoles = map[string]Role{
 // (via NewInvoker). It provides utility methods for RBAC and hierarchical
 // scope checks.
 type Invoker struct {
-    ID string
-    // Claims maps (bitwise) Role -> list of scope patterns (uppercase) where the role applies.
-    Claims map[Role][]string
-    // Scopes holds scope-only patterns (role stripped) for general InScope checks.
-    Scopes []string
+	ID string
+	// Claims maps (bitwise) Role -> list of scope patterns (uppercase) where the role applies.
+	Claims map[Role][]string
+	// Scopes holds scope-only patterns (role stripped) for general InScope checks.
+	Scopes []string
 }
 
 // NewInvoker constructs an Invoker from a user id and a list of raw claim
 // strings of the form "SEG1:SEG2:...:ROLE" or just "SEG1:SEG2:..." for a
 // scope-only assignment.
 func NewInvoker(id string, rawClaims []string) *Invoker {
-    inv := &Invoker{ID: id, Claims: map[Role][]string{}, Scopes: []string{}}
-    for _, raw := range rawClaims {
-        inv.addClaim(raw)
-    }
-    return inv
+	inv := &Invoker{ID: id, Claims: map[Role][]string{}, Scopes: []string{}}
+	for _, raw := range rawClaims {
+		inv.addClaim(raw)
+	}
+	return inv
 }
 
 func (i *Invoker) addClaim(raw string) {
-    raw = strings.TrimSpace(raw)
-    if raw == "" {
-        return
-    }
-    up := normalizeScopePattern(raw)
-    parts := splitScopePath(up)
-    if len(parts) == 0 {
-        return
-    }
-    last := parts[len(parts)-1]
-    if roleBit, ok := authorityRoles[last]; ok {
-        scopeOnly := strings.Join(parts[:len(parts)-1], ":")
-        if scopeOnly != "" {
-            i.Claims[roleBit] = uniqueAppend(i.Claims[roleBit], scopeOnly)
-            i.Scopes = uniqueAppend(i.Scopes, scopeOnly)
-        }
-        return
-    }
-    i.Scopes = uniqueAppend(i.Scopes, up)
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return
+	}
+	up := normalizeScopePattern(raw)
+	parts := splitScopePath(up)
+	if len(parts) == 0 {
+		return
+	}
+	last := parts[len(parts)-1]
+	if roleBit, ok := authorityRoles[last]; ok {
+		scopeOnly := strings.Join(parts[:len(parts)-1], ":")
+		if scopeOnly != "" {
+			i.Claims[roleBit] = uniqueAppend(i.Claims[roleBit], scopeOnly)
+			i.Scopes = uniqueAppend(i.Scopes, scopeOnly)
+		}
+		return
+	}
+	i.Scopes = uniqueAppend(i.Scopes, up)
 }
 
 // GetInvoker builds an Invoker from the transaction context attributes.
@@ -70,60 +70,60 @@ func (i *Invoker) addClaim(raw string) {
 // suffix (e.g., "ES:...:ADMIN"). If the last segment matches a known role
 // token, it is treated as the role; otherwise it's a plain scope.
 func GetInvoker(ctx contractapi.TransactionContextInterface) (*Invoker, error) {
-    id, err := cid.GetID(ctx.GetStub())
-    if err != nil {
-        return nil, fmt.Errorf("failed to get invoker ID: %w", err)
-    }
-    scopeAttr, _, _ := cid.GetAttributeValue(ctx.GetStub(), "scope")
-    scopesAttr, _, _ := cid.GetAttributeValue(ctx.GetStub(), "scopes")
+	id, err := cid.GetID(ctx.GetStub())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get invoker ID: %w", err)
+	}
+	scopeAttr, _, _ := cid.GetAttributeValue(ctx.GetStub(), "scope")
+	scopesAttr, _, _ := cid.GetAttributeValue(ctx.GetStub(), "scopes")
 
-    inv := &Invoker{ID: id, Claims: map[Role][]string{}, Scopes: []string{}}
-    if s := strings.TrimSpace(scopeAttr); s != "" {
-        inv.addClaim(s)
-    }
-    for _, s := range splitCSV(scopesAttr) {
-        inv.addClaim(s)
-    }
-    return inv, nil
+	inv := &Invoker{ID: id, Claims: map[Role][]string{}, Scopes: []string{}}
+	if s := strings.TrimSpace(scopeAttr); s != "" {
+		inv.addClaim(s)
+	}
+	for _, s := range splitCSV(scopesAttr) {
+		inv.addClaim(s)
+	}
+	return inv, nil
 }
 
 // HasRole checks if invoker has a per-bill Role mask.
 func (i *Invoker) HasRole(b *Bill, role Role) bool {
-    if i == nil || b == nil {
-        return false
-    }
-    mask := b.Roles[i.ID]
-    return mask.Has(role)
+	if i == nil || b == nil {
+		return false
+	}
+	mask := b.Roles[i.ID]
+	return mask.Has(role)
 }
 
 // HasRoleInScope returns true if the invoker has the given ROLE at or above the required scope.
 func (i *Invoker) HasRoleInScope(role Role, requiredScope string) bool {
-    if i == nil {
-        return false
-    }
-    req := normalizeScopePattern(requiredScope)
-    patterns := i.Claims[role]
-    if len(patterns) == 0 {
-        return false
-    }
-    // Empty required scope means any scope
-    if req == "" {
-        return true
-    }
-    for _, p := range patterns {
-        if scopeCovers(p, req) {
-            return true
-        }
-    }
-    return false
+	if i == nil {
+		return false
+	}
+	req := normalizeScopePattern(requiredScope)
+	patterns := i.Claims[role]
+	if len(patterns) == 0 {
+		return false
+	}
+	// Empty required scope means any scope
+	if req == "" {
+		return true
+	}
+	for _, p := range patterns {
+		if scopeCovers(p, req) {
+			return true
+		}
+	}
+	return false
 }
 
 // HasAnyRole returns true if the invoker has at least one claim for the given role (any scope).
 func (i *Invoker) HasAnyRole(role Role) bool {
-    if i == nil {
-        return false
-    }
-    return len(i.Claims[role]) > 0
+	if i == nil {
+		return false
+	}
+	return len(i.Claims[role]) > 0
 }
 
 // HasAnyAdmin returns true if the invoker has ADMIN in any scope.
@@ -131,11 +131,11 @@ func (i *Invoker) HasAnyAdmin() bool { return i.HasAnyRole(RoleAdmin) }
 
 // HasAdminFor returns true if the invoker has ADMIN authority at or above the required scope.
 func (i *Invoker) HasAdminFor(requiredScope string) bool {
-    req := normalizeScopePattern(requiredScope)
-    if req == "" {
-        return i.HasAnyAdmin()
-    }
-    return i.HasRoleInScope(RoleAdmin, req)
+	req := normalizeScopePattern(requiredScope)
+	if req == "" {
+		return i.HasAnyAdmin()
+	}
+	return i.HasRoleInScope(RoleAdmin, req)
 }
 
 // InScope checks if invoker belongs to (or is above) the required hierarchical scope.
@@ -143,67 +143,67 @@ func (i *Invoker) HasAdminFor(requiredScope string) bool {
 // Example: required "ES:TEACHER_UNION:DIVISION_2:*" will be satisfied by an invoker with
 // scopes like "ES:*" or "ES:TEACHER_UNION:*" or the exact required one.
 func (i *Invoker) InScope(required string) bool {
-    if i == nil {
-        return false
-    }
-    req := normalizeScopePattern(required)
-    if req == "" {
-        return true // open scope
-    }
-    if len(i.Scopes) == 0 {
-        return false
-    }
-    for _, s := range i.Scopes {
-        if scopeCovers(s, req) {
-            return true
-        }
-    }
-    return false
+	if i == nil {
+		return false
+	}
+	req := normalizeScopePattern(required)
+	if req == "" {
+		return true // open scope
+	}
+	if len(i.Scopes) == 0 {
+		return false
+	}
+	for _, s := range i.Scopes {
+		if scopeCovers(s, req) {
+			return true
+		}
+	}
+	return false
 }
 
 // normalizeScopePattern uppercases and trims a scope pattern.
 func normalizeScopePattern(s string) string {
-    return strings.ToUpper(strings.TrimSpace(s))
+	return strings.ToUpper(strings.TrimSpace(s))
 }
 
 func splitScopePath(s string) []string {
-    s = normalizeScopePattern(s)
-    if s == "" {
-        return []string{}
-    }
-    parts := strings.Split(s, ":")
-    out := make([]string, 0, len(parts))
-    for _, p := range parts {
-        p = strings.TrimSpace(p)
-        if p != "" {
-            out = append(out, p)
-        }
-    }
-    return out
+	s = normalizeScopePattern(s)
+	if s == "" {
+		return []string{}
+	}
+	parts := strings.Split(s, ":")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // scopeCovers returns true if the actorPattern is at the same or higher level than the requiredPattern
 // and matches it by prefix, supporting '*' wildcard in either pattern to match the remainder.
 // This enables higher-hierarchy peers (shorter prefix) to act on lower-level scopes, but not vice‑versa.
 func scopeCovers(actorPattern, requiredPattern string) bool {
-    a := splitScopePath(actorPattern)
-    r := splitScopePath(requiredPattern)
-    if len(r) == 0 {
-        return true
-    }
-    i := 0
-    for i < len(a) && i < len(r) {
-        if a[i] == "*" || r[i] == "*" {
-            return true
-        }
-        if a[i] != r[i] {
-            return false
-        }
-        i++
-    }
-    // Actor covers required when actor is shorter or equal after matching all compared segments
-    if i == len(a) && i <= len(r) {
-        return true
-    }
-    return false
+	a := splitScopePath(actorPattern)
+	r := splitScopePath(requiredPattern)
+	if len(r) == 0 {
+		return true
+	}
+	i := 0
+	for i < len(a) && i < len(r) {
+		if a[i] == "*" || r[i] == "*" {
+			return true
+		}
+		if a[i] != r[i] {
+			return false
+		}
+		i++
+	}
+	// Actor covers required when actor is shorter or equal after matching all compared segments
+	if i == len(a) && i <= len(r) {
+		return true
+	}
+	return false
 }

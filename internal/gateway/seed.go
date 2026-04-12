@@ -115,8 +115,8 @@ func formatTime(epoch int64) string {
 	return time.Unix(epoch, 0).UTC().Format(time.RFC3339)
 }
 
-// parseQuorum is exported for the API handler so users can submit quorum as
-// either "0.5" or "50%". It returns the canonical "0.5" string.
+// parseQuorum accepts quorum as either "0.5" or "50%" and returns the
+// canonical "0.5" string.
 func parseQuorum(s string) (string, error) {
 	if s == "" {
 		return "", errors.New("quorum is required")

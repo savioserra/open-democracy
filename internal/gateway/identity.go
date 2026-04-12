@@ -25,8 +25,8 @@ func (p Participant) Invoker() *bill.Invoker {
 
 // Registry is the in-memory directory of all known participants. It is
 // populated at startup from seed data and can be extended at runtime via
-// AddParticipant. The dashboard renders this list and the API uses it to
-// resolve the X-User header to a *bill.Invoker.
+// Add. The dashboard renders this list and the API uses it to resolve the
+// X-User header to a *bill.Invoker.
 type Registry struct {
 	mu      sync.RWMutex
 	byID    map[string]Participant

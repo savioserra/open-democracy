@@ -41,19 +41,20 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 // and external API consumers, who shouldn't have to know about the bitmask
 // encoding. The internal *bill.Bill is preserved as-is on disk.
 type billDTO struct {
-	ID                 string         `json:"id"`
-	Owner              string         `json:"owner"`
-	Status             string         `json:"status"`
-	Quorum             float64        `json:"quorum"`
-	ExecuteMask        string         `json:"executeMask"`
-	RejectMask         string         `json:"rejectMask"`
-	Scope              string         `json:"scope"`
-	Versions           []versionDTO   `json:"versions"`
+	ID                 string            `json:"id"`
+	Owner              string            `json:"owner"`
+	Status             string            `json:"status"`
+	Quorum             float64           `json:"quorum"`
+	ExecuteMask        string            `json:"executeMask"`
+	RejectMask         string            `json:"rejectMask"`
+	Scope              string            `json:"scope"`
+	Versions           []versionDTO      `json:"versions"`
 	Roles              map[string]string `json:"roles"`
+	VoterCount         int               `json:"voterCount"`
 	Votes              map[string]voteDTO `json:"votes"`
-	VoteStart          int64          `json:"voteStart"`
-	VoteEnd            int64          `json:"voteEnd"`
-	AgreedVersionIndex int            `json:"agreedVersionIndex"`
+	VoteStart          int64             `json:"voteStart"`
+	VoteEnd            int64             `json:"voteEnd"`
+	AgreedVersionIndex int               `json:"agreedVersionIndex"`
 }
 
 type versionDTO struct {
@@ -72,8 +73,12 @@ type voteDTO struct {
 
 func toBillDTO(b *bill.Bill) billDTO {
 	roles := map[string]string{}
+	voterCount := 0
 	for k, v := range b.Roles {
 		roles[k] = roleNames(v)
+		if v.Has(bill.RoleVoter) {
+			voterCount++
+		}
 	}
 	votes := map[string]voteDTO{}
 	for k, v := range b.Votes {
@@ -103,6 +108,7 @@ func toBillDTO(b *bill.Bill) billDTO {
 		Scope:              b.Scope,
 		Versions:           versions,
 		Roles:              roles,
+		VoterCount:         voterCount,
 		Votes:              votes,
 		VoteStart:          b.VoteStart,
 		VoteEnd:            b.VoteEnd,

@@ -19,7 +19,7 @@
       <td><code>{{.Scope}}</code></td>
       <td>{{.Quorum}}</td>
       <td>{{len .Versions}}</td>
-      <td>{{len .Roles}}</td>
+      <td>{{.VoterCount}}</td>
       <td>{{if ge .AgreedVersionIndex 0}}v{{.AgreedVersionIndex}}{{else}}—{{end}}</td>
     </tr>
   {{end}}

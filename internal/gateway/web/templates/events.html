@@ -24,8 +24,19 @@
   function prepend(ev) {
     if (list.querySelector(`[data-seq="${ev.seq}"]`)) return;
     const li = document.createElement('li');
+    const strong = document.createElement('strong');
+    const time = document.createElement('time');
+    const pre = document.createElement('pre');
+
     li.dataset.seq = ev.seq;
-    li.innerHTML = `<strong>${ev.name}</strong> <time>${new Date(ev.time).toLocaleString()}</time><pre>${JSON.stringify(ev.payload, null, 2)}</pre>`;
+    strong.textContent = ev.name;
+    time.textContent = new Date(ev.time).toLocaleString();
+    pre.textContent = JSON.stringify(ev.payload, null, 2);
+
+    li.appendChild(strong);
+    li.appendChild(document.createTextNode(' '));
+    li.appendChild(time);
+    li.appendChild(pre);
     list.prepend(li);
   }
 </script>
