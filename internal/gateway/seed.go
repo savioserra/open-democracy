@@ -269,7 +269,27 @@ func seedSampleBills(reg *Registry, svc *bill.Service) error {
 		return fmt.Errorf("seed delegation dave→carol: %w", err)
 	}
 
+	// ── Collecting bill (popular initiative) ─────────────────────────
+	//
+	// Demonstrates the petition mechanism: Grace (community contributor)
+	// starts a collecting bill targeting CORE scope — even though she has
+	// no PROPOSER authority there. Frank signs too, so it sits at 2/3
+	// signatures, ready for one more to advance to draft.
 	_ = communityElectorate
+	if err := svc.CreateCollectingBill(grace.Invoker(), now-80, "PET-001",
+		"QmCommunityDemandDocs",
+		"Community demands improved developer documentation and onboarding guides at the core level",
+		"OPENDEMOCRACY:CORE:*",
+		"0.5",
+		"YES", "NO",
+		3, // threshold: 3 signatures needed
+	); err != nil {
+		return fmt.Errorf("seed PET-001: %w", err)
+	}
+	if err := svc.SignBill(frank.Invoker(), now-70, "PET-001", nil); err != nil {
+		return fmt.Errorf("seed sign PET-001: %w", err)
+	}
+
 	return nil
 }
 

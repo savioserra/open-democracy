@@ -32,7 +32,7 @@
 //   parágrafo único — "Todo o poder emana do povo, que o exerce por
 //   meio de representantes eleitos ou diretamente."
 //
-// Popular initiative (petitions):
+// Popular initiative (collecting status):
 //   Trechsel, A. H. & Kriesi, H. "Switzerland: The Referendum and
 //   Initiative as a Centrepiece of the Political System." In The
 //   Referendum Experience in Europe, Macmillan, 1996.
@@ -65,12 +65,15 @@ import (
 )
 
 // Status of a bill. The lifecycle follows Lenin's democratic centralism:
-// draft (deliberation) → voting (binding decision) → executed or rejected.
+// collecting (popular initiative) → draft (deliberation) → voting (binding
+// decision) → executed or rejected. The collecting phase is optional: bills
+// created by a PROPOSER or ADMIN start directly in draft.
 const (
-    StatusDraft    = "draft"
-    StatusVoting   = "voting"
-    StatusExecuted = "executed"
-    StatusRejected = "rejected"
+    StatusCollecting = "collecting"
+    StatusDraft      = "draft"
+    StatusVoting     = "voting"
+    StatusExecuted   = "executed"
+    StatusRejected   = "rejected"
 )
 
 // Bitwise roles for per-bill RBAC
@@ -209,49 +212,26 @@ type Criteria struct {
     RejectMask  Choice `json:"rejectMask"`
 }
 
-// Bill is the on-ledger entity
+// Bill is the on-ledger entity. Bills in "collecting" status use the
+// Threshold and Signatures fields for the popular-initiative phase.
+// Once enough signatures are gathered the bill transitions to "draft".
 type Bill struct {
-    ID                 string          `json:"id"`
-    Owner              string          `json:"owner"`
-    Status             string          `json:"status"`
-    Quorum             float64         `json:"quorum"`
-    Criteria           Criteria        `json:"criteria"`
-    Scope              string          `json:"scope"`
-    Versions           []Version       `json:"versions"`
-    Roles              map[string]Role `json:"roles"`
-    Votes              map[string]Vote `json:"votes"`
-    VoteStart          int64           `json:"voteStart"`
-    VoteEnd            int64           `json:"voteEnd"`
-    AgreedVersionIndex int             `json:"agreedVersionIndex"`
-    // SourcePetitionID links the bill back to the petition that created it.
-    // Empty for bills created directly through CreateBill.
-    SourcePetitionID string `json:"sourcePetitionId,omitempty"`
+    ID                 string            `json:"id"`
+    Owner              string            `json:"owner"`
+    Status             string            `json:"status"`
+    Quorum             float64           `json:"quorum"`
+    Criteria           Criteria          `json:"criteria"`
+    Scope              string            `json:"scope"`
+    Versions           []Version         `json:"versions"`
+    Roles              map[string]Role   `json:"roles"`
+    Votes              map[string]Vote   `json:"votes"`
+    VoteStart          int64             `json:"voteStart"`
+    VoteEnd            int64             `json:"voteEnd"`
+    AgreedVersionIndex int               `json:"agreedVersionIndex"`
+    // Threshold is the number of signatures needed to advance from
+    // collecting → draft. Zero means the bill was created directly.
+    Threshold  int              `json:"threshold,omitempty"`
+    // Signatures maps userID → timestamp for the collecting phase.
+    Signatures map[string]int64 `json:"signatures,omitempty"`
 }
 
-// Petition status
-const (
-    PetitionOpen      = "open"
-    PetitionTriggered = "triggered"
-)
-
-// Petition is a popular initiative. Any participant can start one regardless
-// of role. When enough people sign it, a bill is automatically created at the
-// target scope with every in-scope participant enrolled as VOTER. No admin
-// can block the creation or cherry-pick the electorate — the signatures are
-// the mandate. This is the mechanism by which the base can force the
-// leadership to act, consistent with the project's grounding in Marx's
-// material-conditions analysis and Lenin's democratic centralism.
-type Petition struct {
-    ID            string           `json:"id"`
-    Initiator     string           `json:"initiator"`
-    TargetScope   string           `json:"targetScope"`
-    IPFSHash      string           `json:"ipfsHash"`
-    Description   string           `json:"description"`
-    Quorum        float64          `json:"quorum"`
-    Criteria      Criteria         `json:"criteria"`
-    Threshold     int              `json:"threshold"`
-    Signatures    map[string]int64 `json:"signatures"`
-    Status        string           `json:"status"`
-    CreatedBillID string           `json:"createdBillId,omitempty"`
-    Timestamp     int64            `json:"timestamp"`
-}

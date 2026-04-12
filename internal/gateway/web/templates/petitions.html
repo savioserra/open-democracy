@@ -3,45 +3,40 @@
   <h2 class="text-xl font-bold">Petitions</h2>
   <p class="text-sm text-gray-400">
     Popular initiatives. Anyone can start a petition regardless of role. When
-    enough people sign, a bill is created automatically at the target scope with
+    enough people sign, the bill advances to draft with
     <strong class="text-gray-300">every in-scope participant enrolled as voter</strong>.
     No admin can block the creation or cherry-pick the electorate.
   </p>
 </div>
 
-{{$petitions := .Data}}
-{{if $petitions}}
+{{$bills := .Data.Bills}}
+{{if $bills}}
 <div class="overflow-x-auto rounded-lg border border-border">
   <table class="w-full text-sm">
     <thead>
       <tr class="border-b border-border bg-surface-2 text-xs uppercase tracking-wider text-gray-400">
         <th class="px-4 py-3 text-left font-semibold">ID</th>
         <th class="px-4 py-3 text-left font-semibold">Status</th>
-        <th class="px-4 py-3 text-left font-semibold">Initiator</th>
-        <th class="px-4 py-3 text-left font-semibold">Target Scope</th>
+        <th class="px-4 py-3 text-left font-semibold">Owner</th>
+        <th class="px-4 py-3 text-left font-semibold">Scope</th>
         <th class="px-4 py-3 text-left font-semibold">Signatures</th>
         <th class="px-4 py-3 text-left font-semibold">Threshold</th>
-        <th class="px-4 py-3 text-left font-semibold">Bill</th>
       </tr>
     </thead>
     <tbody class="divide-y divide-border">
-    {{range $petitions}}
+    {{range $bills}}
       <tr class="bg-surface transition-colors hover:bg-surface-2">
-        <td class="px-4 py-3"><a href="/petitions/{{.ID}}" class="font-medium text-blue-400 hover:underline">{{.ID}}</a></td>
+        <td class="px-4 py-3"><a href="/bills/{{.ID}}" class="font-medium text-blue-400 hover:underline">{{.ID}}</a></td>
         <td class="px-4 py-3">
-          {{if eq .Status "open"}}<span class="inline-block rounded-full border border-amber-600/50 bg-amber-900/20 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-amber-400">open</span>{{end}}
-          {{if eq .Status "triggered"}}<span class="inline-block rounded-full border border-green-600/50 bg-green-900/20 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-green-400">triggered</span>{{end}}
+          <span class="inline-block rounded-full border border-amber-600/50 bg-amber-900/20 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-amber-400">collecting</span>
         </td>
-        <td class="px-4 py-3 text-gray-300">{{.Initiator}}</td>
-        <td class="px-4 py-3"><code class="rounded bg-surface-2 px-1.5 py-0.5 text-xs">{{.TargetScope}}</code></td>
+        <td class="px-4 py-3 text-gray-300">{{.Owner}}</td>
+        <td class="px-4 py-3"><code class="rounded bg-surface-2 px-1.5 py-0.5 text-xs">{{.Scope}}</code></td>
         <td class="px-4 py-3">
-          <span class="font-semibold {{if eq .Status "triggered"}}text-green-400{{else}}text-amber-400{{end}}">{{.SignatureCount}}</span>
+          <span class="font-semibold text-amber-400">{{.SignatureCount}}</span>
           <span class="text-gray-500">/ {{.Threshold}}</span>
         </td>
         <td class="px-4 py-3 text-gray-300">{{.Threshold}}</td>
-        <td class="px-4 py-3">
-          {{if .CreatedBillID}}<a href="/bills/{{.CreatedBillID}}" class="text-blue-400 hover:underline">{{.CreatedBillID}}</a>{{else}}<span class="text-gray-500">—</span>{{end}}
-        </td>
       </tr>
     {{end}}
     </tbody>
@@ -57,10 +52,10 @@
     Anyone can start a petition. Specify the scope you want the resulting bill to
     target — even if it's above your own authority. The signatures are the mandate.
   </p>
-  <form method="post" action="/actions/create-petition" data-turbo-frame="_top" class="flex flex-wrap items-end gap-3">
+  <form method="post" action="/actions/create-collecting-bill" data-turbo-frame="_top" class="flex flex-wrap items-end gap-3">
     <input type="hidden" name="_user" value="{{.AsUser}}">
     <label class="flex flex-col gap-1 text-xs text-gray-400">
-      Petition ID
+      Bill ID
       <input name="id" required placeholder="PET-001" class="rounded border border-border bg-surface-2 px-3 py-2 text-sm text-gray-200 outline-none placeholder:text-gray-600 focus:border-blue-500">
     </label>
     <label class="flex flex-col gap-1 text-xs text-gray-400">

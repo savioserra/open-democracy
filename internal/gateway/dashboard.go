@@ -84,6 +84,9 @@ type billPageData struct {
 	// Eligible voters lists every participant the dashboard knows about
 	// who could (according to scope+role) be granted votes for this bill.
 	EligibleParticipants []Participant
+	// HasSigned indicates whether the current user already signed a
+	// collecting-status bill.
+	HasSigned bool
 }
 
 func (s *Server) handleBillPage(w http.ResponseWriter, r *http.Request) {
@@ -102,10 +105,18 @@ func (s *Server) handleBillPage(w http.ResponseWriter, r *http.Request) {
 			eligible = append(eligible, p)
 		}
 	}
+	asUser := strings.TrimSpace(r.URL.Query().Get("as"))
+	if asUser == "" {
+		asUser = s.cfg.DefaultUser
+	}
+	hasSigned := false
+	if b.Signatures != nil {
+		_, hasSigned = b.Signatures[asUser]
+	}
 	s.render(w, r, "bill.html", pageData{
 		Title:  "Bill " + id,
 		Active: "bills",
-		Data:   billPageData{Bill: dto, EligibleParticipants: eligible},
+		Data:   billPageData{Bill: dto, EligibleParticipants: eligible, HasSigned: hasSigned},
 	})
 }
 
@@ -151,50 +162,24 @@ func (s *Server) handleFormRevokeDelegation(w http.ResponseWriter, r *http.Reque
 	s.redirectAfterAction(w, r, "/delegations", err)
 }
 
-// Petitions page: list all petitions.
+// Petitions page: filtered view of collecting-status bills.
 func (s *Server) handlePetitionsPage(w http.ResponseWriter, r *http.Request) {
-	petitions, err := s.svc.ListPetitions()
+	bills, err := s.svc.ListBills()
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	out := make([]petitionDTO, 0, len(petitions))
-	for _, p := range petitions {
-		out = append(out, toPetitionDTO(p))
+	out := make([]billDTO, 0)
+	for _, b := range bills {
+		if b.Status == bill.StatusCollecting {
+			out = append(out, toBillDTO(b))
+		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	s.render(w, r, "petitions.html", pageData{
 		Title:  "Petitions",
 		Active: "petitions",
-		Data:   out,
-	})
-}
-
-// Petition detail page.
-type petitionPageData struct {
-	Petition    petitionDTO
-	Participants []Participant
-	HasSigned   bool
-}
-
-func (s *Server) handlePetitionPage(w http.ResponseWriter, r *http.Request) {
-	id := r.PathValue("id")
-	p, err := s.svc.GetPetition(id)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
-		return
-	}
-	dto := toPetitionDTO(p)
-	// Determine if current user already signed.
-	asUser := strings.TrimSpace(r.URL.Query().Get("as"))
-	if asUser == "" {
-		asUser = s.cfg.DefaultUser
-	}
-	_, hasSigned := p.Signatures[asUser]
-	s.render(w, r, "petition.html", pageData{
-		Title:  "Petition " + id,
-		Active: "petitions",
-		Data:   petitionPageData{Petition: dto, Participants: s.registry.List(), HasSigned: hasSigned},
+		Data:   indexData{Bills: out},
 	})
 }
 
@@ -407,7 +392,7 @@ func (s *Server) handleFormEndVote(w http.ResponseWriter, r *http.Request) {
 	s.redirectAfterAction(w, r, "/bills/"+id, err)
 }
 
-func (s *Server) handleFormCreatePetition(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleFormCreateCollectingBill(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
@@ -428,30 +413,30 @@ func (s *Server) handleFormCreatePetition(w http.ResponseWriter, r *http.Request
 			threshold = t
 		}
 	}
-	petID := r.FormValue("id")
-	err = s.svc.CreatePetition(caller, time.Now().Unix(),
-		petID, r.FormValue("ipfsHash"), r.FormValue("description"),
+	billID := r.FormValue("id")
+	err = s.svc.CreateCollectingBill(caller, time.Now().Unix(),
+		billID, r.FormValue("ipfsHash"), r.FormValue("description"),
 		r.FormValue("targetScope"), q, r.FormValue("executeMask"), r.FormValue("rejectMask"), threshold,
 	)
 	target := "/petitions"
 	if err == nil {
-		target = "/petitions/" + petID
+		target = "/bills/" + billID
 	}
 	s.redirectAfterAction(w, r, target, err)
 }
 
-func (s *Server) handleFormSignPetition(w http.ResponseWriter, r *http.Request) {
+func (s *Server) handleFormSignBill(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	petID := r.FormValue("petitionId")
+	billID := r.FormValue("billId")
 	_, caller, err := s.callerForForm(r)
 	if err != nil {
-		s.redirectAfterAction(w, r, "/petitions/"+petID, err)
+		s.redirectAfterAction(w, r, "/bills/"+billID, err)
 		return
 	}
-	eligible := s.eligibleVotersForScope(petID)
-	err = s.svc.SignPetition(caller, time.Now().Unix(), petID, eligible)
-	s.redirectAfterAction(w, r, "/petitions/"+petID, err)
+	eligible := s.eligibleVotersForBillScope(billID)
+	err = s.svc.SignBill(caller, time.Now().Unix(), billID, eligible)
+	s.redirectAfterAction(w, r, "/bills/"+billID, err)
 }
