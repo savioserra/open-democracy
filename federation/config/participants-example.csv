@@ -1,0 +1,52 @@
+# Example participants CSV for registering users with scope claims.
+# Format: user_id,"Display Name",SCOPE_CLAIM1;SCOPE_CLAIM2
+#
+# Scope claims follow the pattern: SEG1:SEG2:...:ROLE
+# where ROLE is one of: ADMIN, PROPOSER, EDITOR, VOTER, AUDITOR
+#
+# Multiple claims are separated by semicolons.
+# Users without a ROLE suffix get scope membership without a specific role.
+
+# ── Government example (City of Porto Alegre) ────────────────────────────
+# Uncomment and adjust for a government deployment.
+#
+# mayor,"Mayor João Silva",GOV:CITY_PORTO_ALEGRE:ADMIN
+# vice_mayor,"Vice-Mayor Maria Santos",GOV:CITY_PORTO_ALEGRE:ADMIN;GOV:CITY_PORTO_ALEGRE:PROPOSER
+# council_pres,"Council President Pedro",GOV:CITY_PORTO_ALEGRE:COUNCIL:ADMIN
+# councilor_ana,"Councilor Ana",GOV:CITY_PORTO_ALEGRE:COUNCIL:PROPOSER;GOV:CITY_PORTO_ALEGRE:COUNCIL:VOTER
+# councilor_luis,"Councilor Luís",GOV:CITY_PORTO_ALEGRE:COUNCIL:PROPOSER;GOV:CITY_PORTO_ALEGRE:COUNCIL:VOTER
+# health_dir,"Dr. Carla (Health Director)",GOV:CITY_PORTO_ALEGRE:HEALTH:ADMIN
+# nurse_rosa,"Rosa (nurse)",GOV:CITY_PORTO_ALEGRE:HEALTH:VOTER
+# citizen_carlos,"Carlos (citizen)",GOV:CITY_PORTO_ALEGRE:COMMUNITY:VOTER;GOV:CITY_PORTO_ALEGRE:COMMUNITY:PROPOSER
+
+# ── Union example (Teachers Union SP) ────────────────────────────────────
+# Uncomment and adjust for a union deployment.
+#
+# president,"Union President Fernanda",UNION:TEACHERS_SP:ADMIN
+# secretary,"Secretary João",UNION:TEACHERS_SP:PROPOSER;UNION:TEACHERS_SP:VOTER
+# delegate_north,"Delegate Norte - Marcos",UNION:TEACHERS_SP:NORTH:ADMIN;UNION:TEACHERS_SP:VOTER
+# delegate_south,"Delegate Sul - Patricia",UNION:TEACHERS_SP:SOUTH:ADMIN;UNION:TEACHERS_SP:VOTER
+# teacher_maria,"Maria (teacher)",UNION:TEACHERS_SP:NORTH:VOTER
+# teacher_paulo,"Paulo (teacher)",UNION:TEACHERS_SP:SOUTH:VOTER
+
+# ── Company example (Acme Corp) ─────────────────────────────────────────
+# Uncomment and adjust for a corporate deployment.
+#
+# ceo,"CEO Alice",CORP:ACME:ADMIN
+# cto,"CTO Bob",CORP:ACME:ENGINEERING:ADMIN;CORP:ACME:BOARD:VOTER
+# eng_lead,"Engineering Lead Carol",CORP:ACME:ENGINEERING:PROPOSER;CORP:ACME:ENGINEERING:VOTER
+# dev_dave,"Developer Dave",CORP:ACME:ENGINEERING:VOTER;CORP:ACME:ENGINEERING:EDITOR
+# dev_eve,"Developer Eve",CORP:ACME:ENGINEERING:VOTER
+# ops_frank,"Ops Lead Frank",CORP:ACME:OPERATIONS:ADMIN
+
+# ── Open Democracy project (this repo) ──────────────────────────────────
+# These match the seeded participants in internal/gateway/seed.go.
+#
+savio,"Savio (project lead)",OPENDEMOCRACY:ADMIN;OPENDEMOCRACY:PROPOSER;OPENDEMOCRACY
+alice,"Alice (senior maintainer)",OPENDEMOCRACY:CORE:PROPOSER;OPENDEMOCRACY:COMMUNITY:ADMIN;OPENDEMOCRACY:CORE;OPENDEMOCRACY:COMMUNITY
+bob,"Bob (tech reviewer)",OPENDEMOCRACY:CORE:EDITOR;OPENDEMOCRACY:CORE
+carol,"Carol (core contributor)",OPENDEMOCRACY:CORE
+dave,"Dave (core contributor)",OPENDEMOCRACY:CORE
+eve,"Eve (core contributor)",OPENDEMOCRACY:CORE
+frank,"Frank (community contributor)",OPENDEMOCRACY:COMMUNITY:PROPOSER;OPENDEMOCRACY:COMMUNITY
+grace,"Grace (community contributor)",OPENDEMOCRACY:COMMUNITY
