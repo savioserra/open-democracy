@@ -141,6 +141,34 @@ func (c *BillContract) SetBillCriteria(ctx contractapi.TransactionContextInterfa
 	return c.service(ctx).SetBillCriteria(caller, billID, executeMask, rejectMask)
 }
 
+// RegisterParticipant adds a participant to the on-ledger identity roster.
+// claimsCSV is a comma-separated list of scope claims.
+func (c *BillContract) RegisterParticipant(ctx contractapi.TransactionContextInterface, participantID, displayName, claimsCSV string) error {
+	caller, err := GetInvoker(ctx)
+	if err != nil {
+		return err
+	}
+	now, err := txTimestampSeconds(ctx)
+	if err != nil {
+		return err
+	}
+	claims := splitCSV(claimsCSV)
+	return c.service(ctx).RegisterParticipant(caller, now, participantID, displayName, claims)
+}
+
+// RemoveParticipant marks a participant as inactive on the ledger.
+func (c *BillContract) RemoveParticipant(ctx contractapi.TransactionContextInterface, participantID string) error {
+	caller, err := GetInvoker(ctx)
+	if err != nil {
+		return err
+	}
+	now, err := txTimestampSeconds(ctx)
+	if err != nil {
+		return err
+	}
+	return c.service(ctx).RemoveParticipant(caller, now, participantID)
+}
+
 // GetBill returns the bill as a JSON string.
 func (c *BillContract) GetBill(ctx contractapi.TransactionContextInterface, billID string) (string, error) {
 	b, err := c.service(ctx).GetBill(billID)

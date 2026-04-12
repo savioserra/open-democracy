@@ -3,7 +3,6 @@ package gateway
 import (
 	"context"
 	"embed"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
@@ -122,101 +121,63 @@ func (s *Server) Run(ctx context.Context) error {
 	}
 }
 
-// --- participant authorization -----------------------------------------------
+// --- participant management --------------------------------------------------
+// Participant operations flow through bill.Service (on-ledger, event-sourced)
+// and optionally through the CA provider (X.509 certificate issuance).
 
-// authorizeParticipantClaims checks that the caller has ADMIN authority
-// covering every scope claim being granted. You can only give authority
-// that you yourself hold — no privilege escalation.
-//
-// Each claim has the form "SEG1:SEG2:...:ROLE" or just "SEG1:SEG2:...".
-// The caller needs ADMIN over the scope portion (everything before the
-// role suffix). For example, granting "OPENDEMOCRACY:CORE:VOTER" requires
-// ADMIN covering "OPENDEMOCRACY:CORE".
-func (s *Server) authorizeParticipantClaims(caller *bill.Invoker, claims []string) error {
-	for _, raw := range claims {
-		scope := scopePortionOfClaim(raw)
-		if !caller.HasAdminFor(scope) {
-			return fmt.Errorf("you need ADMIN authority over %s to grant claim %q", scope, raw)
-		}
+// saveParticipant writes the participant to the ledger via the Service
+// (which enforces ADMIN authorization and emits a ParticipantRegistered
+// event), then registers the identity in the CA if configured, and finally
+// syncs the in-memory registry.
+func (s *Server) saveParticipant(caller *bill.Invoker, p Participant) error {
+	// 1. On-ledger: authorize + store + event.
+	if err := s.svc.RegisterParticipant(caller, time.Now().Unix(), p.ID, p.Display, p.Claims); err != nil {
+		return err
 	}
-	return nil
-}
-
-// scopePortionOfClaim strips a trailing role token (ADMIN, PROPOSER, etc.)
-// from a claim string and returns just the scope hierarchy. If the last
-// segment is not a known role, the full string is returned as-is (it's a
-// scope-only claim).
-func scopePortionOfClaim(claim string) string {
-	claim = strings.TrimSpace(strings.ToUpper(claim))
-	parts := strings.Split(claim, ":")
-	if len(parts) == 0 {
-		return claim
-	}
-	last := parts[len(parts)-1]
-	switch last {
-	case "ADMIN", "PROPOSER", "EDITOR", "VOTER", "AUDITOR":
-		return strings.Join(parts[:len(parts)-1], ":")
-	}
-	return claim
-}
-
-// --- participant persistence -------------------------------------------------
-// Participants are stored alongside bills in the same PersistedStore using a
-// "PARTICIPANT|{id}" key prefix. This way they survive restarts without
-// adding a separate file.
-
-// saveParticipant registers the participant in the CA (if configured),
-// persists it to the store, and adds it to the in-memory registry. The CA
-// write happens first so a CA failure doesn't leave inconsistent state.
-func (s *Server) saveParticipant(p Participant) error {
+	// 2. CA: issue X.509 certificate with scope attributes.
 	if s.idProvider.Available() {
 		if err := s.idProvider.Register(p.ID, p.Display, p.Claims); err != nil {
-			return fmt.Errorf("CA register: %w", err)
+			log.Printf("ca: register %s: %v (ledger record created, cert pending)", p.ID, err)
 		}
 	}
-	data, err := json.Marshal(p)
-	if err != nil {
-		return err
-	}
-	if err := s.store.Put(participantKeyPrefix+p.ID, data); err != nil {
-		return err
-	}
+	// 3. In-memory registry for the gateway's identity resolution.
 	s.registry.Add(p)
 	return nil
 }
 
-// removeParticipant revokes the participant in the CA (if configured),
-// removes it from the store and registry.
-func (s *Server) removeParticipant(id string) error {
-	if !s.registry.Remove(id) {
-		return errors.New("unknown participant: " + id)
+// removeParticipant marks the participant inactive on the ledger via the
+// Service, revokes the CA certificate if configured, and removes from
+// the in-memory registry.
+func (s *Server) removeParticipant(caller *bill.Invoker, id string) error {
+	// 1. On-ledger: authorize + mark inactive + event.
+	if err := s.svc.RemoveParticipant(caller, time.Now().Unix(), id); err != nil {
+		return err
 	}
+	// 2. CA: revoke certificate.
 	if s.idProvider.Available() {
 		if err := s.idProvider.Revoke(id); err != nil {
-			log.Printf("ca: revoke %s: %v (continuing with local removal)", id, err)
+			log.Printf("ca: revoke %s: %v (ledger record removed, cert revocation pending)", id, err)
 		}
 	}
-	// Remove from the store. Put an empty value (the store treats it as a
-	// delete on next load since we filter empty values).
-	return s.store.Put(participantKeyPrefix+id, []byte{})
+	// 3. In-memory registry.
+	s.registry.Remove(id)
+	return nil
 }
 
-// loadPersistedParticipants reads any participants from the store and adds
-// them to the registry. Called during startup before seeding.
+// loadPersistedParticipants reads participants from the ledger (via the
+// Service) and populates the in-memory registry. Called at startup before
+// seeding defaults.
 func (s *Server) loadPersistedParticipants() {
-	kvs, err := s.store.ScanByPrefix(participantKeyPrefix)
+	participants, err := s.svc.ListParticipants()
 	if err != nil {
 		return
 	}
-	for _, kv := range kvs {
-		if len(kv.Value) == 0 {
-			continue
-		}
-		var p Participant
-		if err := json.Unmarshal(kv.Value, &p); err != nil {
-			continue
-		}
-		s.registry.Add(p)
+	for _, lp := range participants {
+		s.registry.Add(Participant{
+			ID:      lp.ID,
+			Display: lp.Display,
+			Claims:  lp.Claims,
+		})
 	}
 }
 

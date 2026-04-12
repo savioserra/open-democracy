@@ -548,13 +548,9 @@ func (s *Server) handleAPICreateParticipant(w http.ResponseWriter, r *http.Reque
 		writeErr(w, http.StatusBadRequest, errors.New("at least one scope claim is required"))
 		return
 	}
-	if err := s.authorizeParticipantClaims(caller, req.Claims); err != nil {
-		writeErr(w, http.StatusForbidden, err)
-		return
-	}
 	p := Participant{ID: req.ID, Display: req.Display, Claims: req.Claims}
-	if err := s.saveParticipant(p); err != nil {
-		writeErr(w, http.StatusInternalServerError, err)
+	if err := s.saveParticipant(caller, p); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
 	writeJSON(w, http.StatusCreated, p)
@@ -567,17 +563,8 @@ func (s *Server) handleAPIDeleteParticipant(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	id := r.PathValue("id")
-	target, tErr := s.registry.Get(id)
-	if tErr != nil {
-		writeErr(w, http.StatusNotFound, tErr)
-		return
-	}
-	if err := s.authorizeParticipantClaims(caller, target.Claims); err != nil {
-		writeErr(w, http.StatusForbidden, err)
-		return
-	}
-	if err := s.removeParticipant(id); err != nil {
-		writeErr(w, http.StatusNotFound, err)
+	if err := s.removeParticipant(caller, id); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)

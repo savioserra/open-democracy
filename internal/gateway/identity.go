@@ -7,7 +7,6 @@ import (
 	"open-democracy/chaincode/bill"
 )
 
-const participantKeyPrefix = "PARTICIPANT|"
 
 // Participant is a known identity that the gateway can act as. It mirrors,
 // in spirit, an X.509 certificate carrying scope claims, but uses pure data
