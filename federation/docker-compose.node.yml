@@ -96,8 +96,17 @@ services:
       GATEWAY_ADDR: ":${GATEWAY_PORT:-8080}"
       GATEWAY_DATA: "/data"
       GATEWAY_USER: "${GATEWAY_DEFAULT_USER:-admin}"
+      # Fabric CA integration — when set, participants added through the
+      # dashboard are registered in the CA with X.509 scope attributes.
+      FABRIC_CA_URL: "https://ca.${ORG_DOMAIN:-myorg.od.example.com}:${CA_PORT:-7054}"
+      FABRIC_CA_NAME: "ca-${ORG_NAME:-myorg}"
+      FABRIC_CA_ADMIN_USER: "${CA_ADMIN_USER:-admin}"
+      FABRIC_CA_ADMIN_PASS: "${CA_ADMIN_PASS:-adminpw}"
+      FABRIC_CA_TLS_CERT: "/etc/hyperledger/fabric/tls/ca-cert.pem"
+      FABRIC_CA_MSP_DIR: "/data/msp"
     volumes:
       - gateway-data:/data
+      - ./crypto/ca/ca-cert.pem:/etc/hyperledger/fabric/tls/ca-cert.pem:ro
     ports:
       - "${GATEWAY_PORT:-8080}:${GATEWAY_PORT:-8080}"
     networks:

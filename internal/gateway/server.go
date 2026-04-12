@@ -22,20 +22,22 @@ var webFS embed.FS
 // Config holds runtime configuration for the gateway. Fields map directly to
 // environment variables read by cmd/gateway/main.go.
 type Config struct {
-	Addr      string // listen address, e.g. :8080
-	StorePath string // path to JSON-backed store file
-	DefaultUser string // default participant id when X-User is missing
+	Addr        string    // listen address, e.g. :8080
+	StorePath   string    // path to JSON-backed store file
+	DefaultUser string    // default participant id when X-User is missing
+	CA          *CAConfig // Fabric CA connection (nil = demo mode)
 }
 
 // Server is the gateway HTTP server. It owns the persisted store, the bill
-// service, the participant registry, and the event broadcaster, and exposes
-// both a REST API and a server-rendered dashboard.
+// service, the participant registry, the event broadcaster, and the identity
+// provider (Fabric CA in production, no-op in demo mode).
 type Server struct {
 	cfg         Config
 	store       *PersistedStore
 	svc         *bill.Service
 	registry    *Registry
 	broadcaster *Broadcaster
+	idProvider  IdentityProvider
 	templates   map[string]*template.Template
 	staticFS    fs.FS
 	mux         *http.ServeMux
@@ -51,6 +53,17 @@ func NewServer(cfg Config) (*Server, error) {
 	}
 	bcast := NewBroadcaster(500)
 	svc := bill.NewService(store, bcast)
+	// Initialize the identity provider (Fabric CA or no-op).
+	var idProvider IdentityProvider = LocalProvider{}
+	if cfg.CA != nil && cfg.CA.Configured() {
+		caProvider, caErr := NewFabricCAProvider(*cfg.CA)
+		if caErr != nil {
+			log.Printf("ca: WARNING: %v — falling back to local-only mode", caErr)
+		} else {
+			idProvider = caProvider
+		}
+	}
+
 	reg := NewRegistry()
 	// Pre-create the server so we can use loadPersistedParticipants before
 	// seeding defaults. This ensures user-added participants survive restarts
@@ -61,6 +74,7 @@ func NewServer(cfg Config) (*Server, error) {
 		svc:         svc,
 		registry:    reg,
 		broadcaster: bcast,
+		idProvider:  idProvider,
 	}
 	s.loadPersistedParticipants()
 	if err := Seed(reg, svc); err != nil {
@@ -151,9 +165,15 @@ func scopePortionOfClaim(claim string) string {
 // "PARTICIPANT|{id}" key prefix. This way they survive restarts without
 // adding a separate file.
 
-// saveParticipant persists a participant to the store and adds it to the
-// in-memory registry.
+// saveParticipant registers the participant in the CA (if configured),
+// persists it to the store, and adds it to the in-memory registry. The CA
+// write happens first so a CA failure doesn't leave inconsistent state.
 func (s *Server) saveParticipant(p Participant) error {
+	if s.idProvider.Available() {
+		if err := s.idProvider.Register(p.ID, p.Display, p.Claims); err != nil {
+			return fmt.Errorf("CA register: %w", err)
+		}
+	}
 	data, err := json.Marshal(p)
 	if err != nil {
 		return err
@@ -165,10 +185,16 @@ func (s *Server) saveParticipant(p Participant) error {
 	return nil
 }
 
-// removeParticipant removes a participant from the store and registry.
+// removeParticipant revokes the participant in the CA (if configured),
+// removes it from the store and registry.
 func (s *Server) removeParticipant(id string) error {
 	if !s.registry.Remove(id) {
 		return errors.New("unknown participant: " + id)
+	}
+	if s.idProvider.Available() {
+		if err := s.idProvider.Revoke(id); err != nil {
+			log.Printf("ca: revoke %s: %v (continuing with local removal)", id, err)
+		}
 	}
 	// Remove from the store. Put an empty value (the store treats it as a
 	// delete on next load since we filter empty values).
