@@ -469,24 +469,9 @@ func (s *Service) Delegate(caller *Invoker, now int64, delegatee, scope string) 
 	if scope == "" {
 		return errors.New("scope is required")
 	}
-	// Detect cycles: walk the chain from the delegatee. If we ever reach
-	// the caller, it would form a cycle.
-	visited := map[string]bool{caller.ID: true}
-	current := delegatee
-	for {
-		visited[current] = true
-		d, err := s.getDelegation(current, scope)
-		if err != nil || d == nil {
-			break
-		}
-		if d.Delegatee == caller.ID {
-			return errors.New("delegation would create a cycle")
-		}
-		if visited[d.Delegatee] {
-			break
-		}
-		current = d.Delegatee
-	}
+	// With depth-1 (no transitivity), mutual delegation is harmless:
+	// Alice→Bob and Bob→Alice simply means each represents the other.
+	// If neither votes, both are absent. No cycle detection needed.
 	del := &Delegation{
 		Delegator: caller.ID,
 		Delegatee: delegatee,
@@ -588,26 +573,20 @@ func (s *Service) ResolveDelegatedWeight(billScope string, votes map[string]Vote
 	return weights, absent
 }
 
-// resolveDelegationChain walks the delegation chain from uid until it finds
-// someone who actually voted, or hits a dead end / cycle. Returns the
-// voter's ID or "" if no representative voted.
+// resolveDelegationChain looks up the DIRECT delegate for uid in the given
+// scope. Delegation is depth-1 only — no transitivity. If Alice delegates
+// to Bob and Bob delegates to Carol, and Bob doesn't vote, Alice is absent.
+// This prevents power concentration while preserving the Brazilian federal
+// model: one representative per scope level, each accountable directly.
 func (s *Service) resolveDelegationChain(uid, scope string, votes map[string]Vote) string {
-	visited := map[string]bool{}
-	current := uid
-	for {
-		if visited[current] {
-			return "" // cycle
-		}
-		visited[current] = true
-		d, err := s.getDelegation(current, scope)
-		if err != nil || d == nil {
-			return "" // no delegation, no vote → absent
-		}
-		if _, voted := votes[d.Delegatee]; voted {
-			return d.Delegatee // found a representative who voted
-		}
-		current = d.Delegatee
+	d, err := s.getDelegation(uid, scope)
+	if err != nil || d == nil {
+		return ""
 	}
+	if _, voted := votes[d.Delegatee]; voted {
+		return d.Delegatee
+	}
+	return "" // delegate didn't vote → delegator is absent
 }
 
 // delegation store helpers

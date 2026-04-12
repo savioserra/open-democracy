@@ -268,21 +268,33 @@ func TestDelegationBasic(t *testing.T) {
 	}
 }
 
-func TestDelegationRejectsCycle(t *testing.T) {
+func TestMutualDelegationIsHarmless(t *testing.T) {
+	// With depth-1, mutual delegation is harmless: Alice→Bob and Bob→Alice.
+	// If neither votes, both are absent. If one votes, the other is represented.
 	svc, _ := newTestService()
 	alice := NewInvoker("alice", []string{"ES"})
 	bob := NewInvoker("bob", []string{"ES"})
 	_ = svc.Delegate(alice, 1, "bob", "ES:*")
-	if err := svc.Delegate(bob, 2, "alice", "ES:*"); err == nil {
-		t.Fatal("expected cycle detection error")
+	if err := svc.Delegate(bob, 2, "alice", "ES:*"); err != nil {
+		t.Fatalf("mutual delegation should be allowed with depth-1: %v", err)
+	}
+	// If only alice votes, bob's delegation to alice gives alice weight 2
+	votes := map[string]Vote{"alice": {Choice: ChoiceYes}}
+	weights, absent := svc.ResolveDelegatedWeight("ES:*", votes, []string{"alice", "bob"})
+	if weights["alice"] != 2 {
+		t.Fatalf("expected alice=2 (herself + bob's delegation), got %d", weights["alice"])
+	}
+	if absent != 0 {
+		t.Fatalf("expected 0 absent, got %d", absent)
 	}
 }
 
-func TestDelegationTransitiveWeight(t *testing.T) {
+func TestDelegationDepthOneOnly(t *testing.T) {
+	// Depth-1: alice → bob → carol. Carol votes YES, dave votes NO.
+	// Bob didn't vote, so alice's delegation to bob is wasted (alice absent).
+	// Carol gets weight 2 (herself + bob's direct delegation), not 3.
+	// YES=2, NO=1, absent=1 → executed (2 > 1).
 	svc, _ := newTestService()
-	// alice → bob → carol (chain). carol votes YES, dave votes NO.
-	// carol should get weight 3 (herself + bob + alice), dave weight 1.
-	// YES=3, NO=1 → executed.
 	carol := NewInvoker("carol", []string{"ES:UNION:PROPOSER"})
 	dave := NewInvoker("dave", []string{"ES:UNION"})
 
@@ -302,13 +314,56 @@ func TestDelegationTransitiveWeight(t *testing.T) {
 	if _, err := svc.CastVote(dave, 150, "B1", "NO"); err != nil {
 		t.Fatalf("dave cast: %v", err)
 	}
+
+	// Verify weights directly
 	electorate := []string{"alice", "bob", "carol", "dave"}
+	votes := map[string]Vote{
+		"carol": {Choice: ChoiceYes},
+		"dave":  {Choice: ChoiceNo},
+	}
+	weights, absent := svc.ResolveDelegatedWeight("ES:UNION:*", votes, electorate)
+	// carol=2 (herself + bob→carol), dave=1, alice=absent (bob didn't vote)
+	if weights["carol"] != 2 {
+		t.Fatalf("expected carol weight 2, got %d", weights["carol"])
+	}
+	if weights["dave"] != 1 {
+		t.Fatalf("expected dave weight 1, got %d", weights["dave"])
+	}
+	if absent != 1 {
+		t.Fatalf("expected 1 absent (alice), got %d", absent)
+	}
+
 	if err := svc.EndVote(carol, 999, "B1", electorate); err != nil {
 		t.Fatalf("end: %v", err)
 	}
 	b, _ := svc.GetBill("B1")
 	if b.Status != StatusExecuted {
-		t.Fatalf("expected executed (YES=3 via delegation vs NO=1), got %s", b.Status)
+		t.Fatalf("expected executed (YES=2 vs NO=1), got %s", b.Status)
+	}
+}
+
+func TestDelegationMultipleScopes(t *testing.T) {
+	// One person can delegate to different people at different scope levels.
+	// This mirrors the Brazilian federal model: different representatives
+	// at municipal, state, and federal levels.
+	svc, _ := newTestService()
+	user := NewInvoker("user", []string{"ES:ORG:DIV"})
+	_ = svc.Delegate(user, 1, "local_rep", "ES:ORG:DIV:*")
+	_ = svc.Delegate(user, 2, "org_rep", "ES:ORG:*")
+	_ = svc.Delegate(user, 3, "root_rep", "ES:*")
+
+	d1, _ := svc.GetDelegation("user", "ES:ORG:DIV:*")
+	d2, _ := svc.GetDelegation("user", "ES:ORG:*")
+	d3, _ := svc.GetDelegation("user", "ES:*")
+
+	if d1.Delegatee != "local_rep" {
+		t.Fatalf("expected local_rep at DIV, got %s", d1.Delegatee)
+	}
+	if d2.Delegatee != "org_rep" {
+		t.Fatalf("expected org_rep at ORG, got %s", d2.Delegatee)
+	}
+	if d3.Delegatee != "root_rep" {
+		t.Fatalf("expected root_rep at root, got %s", d3.Delegatee)
 	}
 }
 
