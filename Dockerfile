@@ -40,15 +40,19 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -trimpath -ldflags="-s -w" -o /out/gateway ./cmd/gateway
+RUN mkdir -p /out/data && touch /out/data/.od-volume-init
 
 # -- Runtime image ------------------------------------------------------------
 FROM gcr.io/distroless/static-debian12:nonroot AS runtime
 WORKDIR /app
 COPY --from=build /out/gateway /app/gateway
+# Seed /data in the image so first-time named-volume mounts inherit a writable
+# directory owned by the nonroot runtime user.
+COPY --chown=nonroot:nonroot --from=build /out/data /data
 
 ENV GATEWAY_ADDR=:8080 \
     GATEWAY_DATA=/data \
-    GATEWAY_USER=ada
+    GATEWAY_USER=savio
 
 VOLUME ["/data"]
 EXPOSE 8080

@@ -17,6 +17,9 @@
 #
 # The peer will sync the full ledger from the ordering service and the
 # gateway will serve the dashboard with all cross-org proposals visible.
+# When started via odctl, the live ORG_* / CA_* / GATEWAY_* values come from
+# federation/democracy.toml; the fallback literals below are only examples for
+# legacy manual compose usage.
 
 services:
 
@@ -65,7 +68,12 @@ services:
     environment:
       FABRIC_CA_HOME: /etc/hyperledger/fabric-ca-server
       FABRIC_CA_SERVER_CA_NAME: ca-${ORG_NAME:-myorg}
+      FABRIC_CA_SERVER_CA_CERTFILE: /etc/hyperledger/fabric-ca-server/ca-cert.pem
+      FABRIC_CA_SERVER_CA_KEYFILE: /etc/hyperledger/fabric-ca-server/ca-key.pem
+      FABRIC_CA_SERVER_BOOT: "${CA_ADMIN_USER:-admin}:${CA_ADMIN_PASS:-adminpw}"
       FABRIC_CA_SERVER_TLS_ENABLED: "true"
+      FABRIC_CA_SERVER_TLS_CERTFILE: /etc/hyperledger/fabric-ca-server/tls-cert.pem
+      FABRIC_CA_SERVER_TLS_KEYFILE: /etc/hyperledger/fabric-ca-server/tls-key.pem
       FABRIC_CA_SERVER_PORT: "${CA_PORT:-7054}"
       FABRIC_CA_SERVER_OPERATIONS_LISTENADDRESS: 0.0.0.0:9443
     ports:
@@ -95,7 +103,7 @@ services:
     environment:
       GATEWAY_ADDR: ":${GATEWAY_PORT:-8080}"
       GATEWAY_DATA: "/data"
-      GATEWAY_USER: "${GATEWAY_DEFAULT_USER:-admin}"
+      GATEWAY_USER: "${GATEWAY_DEFAULT_USER:-savio}"
       # Fabric CA integration — when set, participants added through the
       # dashboard are registered in the CA with X.509 scope attributes.
       FABRIC_CA_URL: "https://ca.${ORG_DOMAIN:-myorg.od.example.com}:${CA_PORT:-7054}"

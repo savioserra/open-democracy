@@ -1,23 +1,10 @@
-// odctl is the federation CLI for open-democracy. It provides a terminal
-// UI to configure, bootstrap, and manage an open-democracy node.
-//
-// Run it from the project root:
-//
-//	./bin/odctl
+// odctl is the federation CLI for open-democracy. It offers a hybrid
+// interface: no arguments launch the terminal UI, and explicit subcommands
+// provide scriptable operations for demo and federation node workflows.
 package main
 
-import (
-	"fmt"
-	"os"
-
-	tea "github.com/charmbracelet/bubbletea"
-	"open-democracy/internal/tui"
-)
+import "os"
 
 func main() {
-	p := tea.NewProgram(tui.New(), tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
-		fmt.Fprintln(os.Stderr, "Error:", err)
-		os.Exit(1)
-	}
+	os.Exit(newCLI(os.Stdout, os.Stderr).run(os.Args[1:]))
 }

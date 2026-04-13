@@ -10,12 +10,13 @@
 #   5. Submit the update to the orderer
 #
 # Prerequisites:
-#   - The network is running (docker-compose.fabric.yml or equivalent)
+#   - The network is running from a generated founding-network run
 #   - The new org has generated its crypto material (see bootstrap-node.sh)
 #   - Fabric binaries (peer, configtxlator, jq) available
 #   - An admin identity from an existing org to sign the update
 #
 # Usage:
+#   source federation/runs/<instance>/run.env
 #   ./scripts/add-organization.sh \
 #       --org-name    "CityGov" \
 #       --org-msp-id  "CityGovMSP" \
@@ -27,11 +28,15 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FED_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+NETWORK_DIR="${NETWORK_DIR:-$FED_DIR}"
+CRYPTO_DIR="${CRYPTO_DIR:-$NETWORK_DIR/crypto}"
+ARTIFACTS_DIR="${ARTIFACTS_DIR:-$NETWORK_DIR/channel-artifacts}"
 
 # ── Defaults ─────────────────────────────────────────────────────────────
 
 CHANNEL_NAME="governance"
 ORDERER_ADDR="orderer1.od.example.com:7050"
+ORDERER_CA="${ORDERER_CA:-$CRYPTO_DIR/ordererOrganizations/od.example.com/msp/tlscacerts/tlsca.od.example.com-cert.pem}"
 ORG_NAME=""
 ORG_MSP_ID=""
 ORG_MSP_DIR=""
@@ -81,6 +86,16 @@ done
 info()  { echo "==> $*"; }
 fatal() { echo "FATAL: $*" >&2; exit 1; }
 
+require_generated_run() {
+    if [ ! -f "$ORDERER_CA" ]; then
+        fatal "Missing orderer TLS CA at $ORDERER_CA
+
+Source federation/runs/<instance>/run.env or set NETWORK_DIR/CRYPTO_DIR/ORDERER_CA
+to an active generated founding-network run before using this script."
+    fi
+    mkdir -p "$ARTIFACTS_DIR"
+}
+
 WORK_DIR=$(mktemp -d)
 trap "rm -rf $WORK_DIR" EXIT
 
@@ -89,12 +104,14 @@ trap "rm -rf $WORK_DIR" EXIT
 info "Adding organization $ORG_NAME ($ORG_MSP_ID) to channel $CHANNEL_NAME"
 echo ""
 
+require_generated_run
+
 # Step 1: Fetch current channel config.
 info "Step 1/5: Fetching current channel configuration..."
 peer channel fetch config "$WORK_DIR/config_block.pb" \
     -o "$ORDERER_ADDR" \
     -c "$CHANNEL_NAME" \
-    --tls --cafile "$FED_DIR/crypto/ordererOrganizations/od.example.com/msp/tlscacerts/tlsca.od.example.com-cert.pem"
+    --tls --cafile "$ORDERER_CA"
 
 # Decode to JSON.
 configtxlator proto_decode \
@@ -179,8 +196,8 @@ cat > "$WORK_DIR/new-org.json" <<ORGJSON
 }
 ORGJSON
 
-info "  NOTE: In production, use 'configtxgen -printOrg' to generate the"
-info "  org definition from configtx.yaml, which includes the full MSP"
+info "  NOTE: In production, use 'configtxgen -printOrg' against the active"
+info "  run's configtx.yaml to generate the full MSP-aware org definition"
 info "  certificates. The JSON above is a structural template."
 
 # Step 3: Add the new org to the config.
@@ -251,5 +268,5 @@ echo "  peer lifecycle chaincode install bill.tar.gz"
 echo ""
 
 # Copy the envelope to a stable location.
-cp "$WORK_DIR/config_update_envelope.pb" "$FED_DIR/channel-artifacts/${ORG_NAME}_config_update.pb"
-info "Config update saved to: $FED_DIR/channel-artifacts/${ORG_NAME}_config_update.pb"
+cp "$WORK_DIR/config_update_envelope.pb" "$ARTIFACTS_DIR/${ORG_NAME}_config_update.pb"
+info "Config update saved to: $ARTIFACTS_DIR/${ORG_NAME}_config_update.pb"

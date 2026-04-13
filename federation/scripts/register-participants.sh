@@ -9,10 +9,11 @@
 # Prerequisites:
 #   - Fabric CA client (fabric-ca-client) in PATH
 #   - The organization's CA is running
-#   - The .env file is configured (see config/org-template.env)
+#   - The .env file is exported from odctl (use `./bin/odctl node setup --persist-env`)
 #
 # Usage:
-#   # Source your org's environment
+#   # Export and source your org's environment
+#   ./bin/odctl node setup --persist-env
 #   source .env
 #
 #   # Register participants from a CSV file:

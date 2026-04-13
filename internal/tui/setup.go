@@ -2,19 +2,18 @@ package tui
 
 import (
 	"fmt"
-	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// setupModel is a multi-step form that writes federation/.env.
+// setupModel is a multi-step form that writes federation/democracy.toml.
 type setupModel struct {
 	inputs     []textinput.Model
 	labels     []string
 	hints      []string
-	envKeys    []string // corresponding .env key
 	focusIndex int
 	state      ProjectState
 	saved      bool
@@ -23,23 +22,41 @@ type setupModel struct {
 }
 
 func newSetup(state ProjectState, width int) setupModel {
+	cfg := defaultNodeConfig()
+	if state.ConfigConfigured {
+		cfg = state.Config
+	}
+	cfg = cfg.withDefaults()
+
 	labels := []string{
 		"Organization name",
 		"Display name",
 		"Scope prefix",
+		"Organization domain",
 		"Gateway port",
+		"Gateway default user",
+		"CA admin user",
+		"CA admin password",
 	}
 	hints := []string{
 		"Lowercase, no spaces (e.g. city-porto-alegre)",
 		"Human-readable (e.g. City of Porto Alegre)",
 		"Root scope hierarchy (e.g. GOV:CITY_PORTO_ALEGRE)",
+		"Runtime domain injected into docker compose (e.g. shyylol.od.local)",
 		"HTTP port for the dashboard (default 8080)",
+		"Participant ID used when requests omit X-User (default savio)",
+		"Fabric CA registrar username",
+		"Fabric CA registrar password",
 	}
-	envKeys := []string{"ORG_NAME", "ORG_DISPLAY", "SCOPE_PREFIX", "GATEWAY_PORT"}
-
-	defaults := []string{"", "", "", "8080"}
-	if state.EnvConfigured {
-		defaults = []string{state.OrgName, state.OrgDisplay, state.ScopePrefix, state.GatewayPort}
+	defaults := []string{
+		firstNonEmpty(strings.TrimSpace(cfg.Organization.Name), state.OrgName),
+		firstNonEmpty(strings.TrimSpace(cfg.Organization.DisplayName), state.OrgDisplay),
+		firstNonEmpty(strings.TrimSpace(cfg.Organization.ScopePrefix), state.ScopePrefix),
+		cfg.Domain(),
+		strconv.Itoa(cfg.Gateway.Port),
+		cfg.Gateway.DefaultUser,
+		cfg.CA.AdminUser,
+		cfg.CA.AdminPass,
 	}
 
 	inputs := make([]textinput.Model, len(labels))
@@ -49,6 +66,10 @@ func newSetup(state ProjectState, width int) setupModel {
 		ti.CharLimit = 120
 		ti.Width = 50
 		ti.SetValue(defaults[i])
+		if i == len(labels)-1 {
+			ti.EchoMode = textinput.EchoPassword
+			ti.EchoCharacter = '*'
+		}
 		if i == 0 {
 			ti.Focus()
 		}
@@ -56,12 +77,11 @@ func newSetup(state ProjectState, width int) setupModel {
 	}
 
 	return setupModel{
-		inputs:  inputs,
-		labels:  labels,
-		hints:   hints,
-		envKeys: envKeys,
-		state:   state,
-		width:   width,
+		inputs: inputs,
+		labels: labels,
+		hints:  hints,
+		state:  state,
+		width:  width,
 	}
 }
 
@@ -95,28 +115,22 @@ func (m setupModel) update(msg tea.Msg) (setupModel, tea.Cmd) {
 }
 
 func (m setupModel) save() (setupModel, tea.Cmd) {
-	name := strings.TrimSpace(m.inputs[0].Value())
-	if name == "" {
-		m.err = fmt.Errorf("organization name is required")
-		return m, nil
-	}
-
-	vals := make(map[string]string)
-	for i, key := range m.envKeys {
-		vals[key] = strings.TrimSpace(m.inputs[i].Value())
-	}
-
-	// Auto-derive MSP ID and domain from org name.
-	pascal := toPascalCase(name)
-	vals["ORG_MSP_ID"] = pascal + "MSP"
-	vals["ORG_DOMAIN"] = strings.ReplaceAll(name, " ", "") + ".od.example.com"
-
-	envPath := filepath.Join(m.state.FedDir, ".env")
-	if err := writeEnv(envPath, vals); err != nil {
+	updated, err := saveNodeConfig(m.state, SetupValues{
+		OrgName:            m.inputs[0].Value(),
+		OrgDisplay:         m.inputs[1].Value(),
+		ScopePrefix:        m.inputs[2].Value(),
+		Domain:             m.inputs[3].Value(),
+		GatewayPort:        m.inputs[4].Value(),
+		GatewayDefaultUser: m.inputs[5].Value(),
+		CAAdminUser:        m.inputs[6].Value(),
+		CAAdminPass:        m.inputs[7].Value(),
+	})
+	if err != nil {
 		m.err = err
 		return m, nil
 	}
 
+	m.state = updated
 	m.saved = true
 	return m, func() tea.Msg {
 		return refreshStateMsg{}
@@ -142,7 +156,7 @@ func (m setupModel) view() string {
 	sb.WriteString("\n\n")
 
 	if m.saved {
-		sb.WriteString(successStyle.Render("  ✓ Configuration saved to federation/.env"))
+		sb.WriteString(successStyle.Render("  ✓ Configuration saved to federation/democracy.toml"))
 		sb.WriteString("\n\n")
 		sb.WriteString(dimStyle.Render("  MSP ID:  ") + m.state.MspID)
 		sb.WriteString("\n")

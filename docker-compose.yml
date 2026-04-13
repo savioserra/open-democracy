@@ -23,7 +23,7 @@ services:
     environment:
       GATEWAY_ADDR: ":8080"
       GATEWAY_DATA: "/data"
-      GATEWAY_USER: "ada"
+      GATEWAY_USER: "savio"
     volumes:
       - ledger-data:/data
     restart: unless-stopped

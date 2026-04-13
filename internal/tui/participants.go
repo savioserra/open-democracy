@@ -199,7 +199,7 @@ func (m participantsModel) view() string {
 		// Header.
 		hdr := fmt.Sprintf("  %-15s %-25s %s", "ID", "Name", "Scopes")
 		sb.WriteString(dimStyle.Render(hdr) + "\n")
-		sb.WriteString(dimStyle.Render("  " + strings.Repeat("─", min(70, m.width-6))) + "\n")
+		sb.WriteString(dimStyle.Render("  "+strings.Repeat("─", min(70, m.width-6))) + "\n")
 
 		// Rows.
 		vis := m.visibleLines()

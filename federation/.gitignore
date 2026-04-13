@@ -5,8 +5,14 @@ channel-artifacts/
 # Organization-specific environment (contains CA passwords).
 .env
 
+# odctl source-of-truth configuration (contains org identity and CA credentials).
+democracy.toml
+
 # Generated connection profiles.
 connection-profile.yaml
+
+# Generated isolated founding-network runs.
+runs/
 
 # Fabric CA server state.
 fabric-ca-server/

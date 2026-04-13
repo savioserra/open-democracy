@@ -2,6 +2,11 @@
 # bootstrap-node.sh — Prepare a new organization's node to join the
 # open-democracy federation.
 #
+# Legacy script path:
+#   odctl now uses federation/democracy.toml as the source of truth.
+#   Export a compatibility .env with:
+#     ./bin/odctl node setup --persist-env
+#
 # This script:
 #   1. Reads the org configuration from .env
 #   2. Generates crypto material (CA bootstrap + peer TLS)
@@ -10,15 +15,13 @@
 #   5. Prints next steps for joining the federation
 #
 # Prerequisites:
-#   - .env file configured (copy from config/org-template.env)
+#   - .env file configured (for example via `./bin/odctl node setup --persist-env`)
 #   - Docker installed (for Fabric CA container)
 #   - openssl available
 #
 # Usage:
-#   cd federation/
-#   cp config/org-template.env .env
-#   # edit .env with your org's details
-#   ./scripts/bootstrap-node.sh
+#   ./bin/odctl node setup --persist-env
+#   ./federation/scripts/bootstrap-node.sh
 
 set -euo pipefail
 
@@ -31,9 +34,8 @@ ENV_FILE="$FED_DIR/.env"
 if [ ! -f "$ENV_FILE" ]; then
     echo "ERROR: .env file not found at $ENV_FILE"
     echo ""
-    echo "Copy the template and configure it:"
-    echo "  cp $FED_DIR/config/org-template.env $ENV_FILE"
-    echo "  \$EDITOR $ENV_FILE"
+    echo "Export a compatibility env from odctl:"
+    echo "  ./bin/odctl node setup --persist-env"
     exit 1
 fi
 

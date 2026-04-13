@@ -228,15 +228,14 @@ This is packaged as `federation/docker-compose.node.yml`. A new organization
 runs:
 
 ```bash
-# 1. Configure their org name and scope prefix
-cp federation/config/org-template.env .env
-# edit .env: ORG_NAME=city-gov, SCOPE_PREFIX=GOV:CITY_PORTO_ALEGRE
+# 1. Configure their org name, scope prefix, and runtime domain
+./bin/odctl node setup --org-name city-gov --scope-prefix GOV:CITY_PORTO_ALEGRE --domain city-gov.od.local
 
 # 2. Generate crypto material
-./federation/scripts/bootstrap-node.sh
+./bin/odctl node bootstrap
 
 # 3. Start the node
-docker compose -f federation/docker-compose.node.yml up -d
+./bin/odctl node start
 
 # 4. Join the federation (requires approval from existing members)
 ./federation/scripts/join-network.sh --channel governance --orderer orderer1.od.example.com:7050
@@ -248,12 +247,13 @@ The first time the network is created, a founding set of organizations
 bootstraps the orderer cluster and genesis channel:
 
 ```bash
-./federation/scripts/bootstrap-network.sh
+./bin/odctl network start
 ```
 
-This creates the ordering service, the governance channel, and deploys the
-`bill` chaincode with an endorsement policy requiring agreement from a
-majority of member organizations.
+This generates an isolated founding-network run under
+`federation/runs/<instance>/`, writes the compose/configtx/crypto-config files
+for that topology, bootstraps the Fabric artifacts, and starts Docker Compose
+with an instance-specific project name so repeated runs stay isolated.
 
 ## 5. How Blockchains Talk Across Networks
 

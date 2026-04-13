@@ -64,6 +64,9 @@ func (m App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case refreshStateMsg:
 		m.state = DetectState()
 		m.menu.state = m.state
+		m.setup.state = m.state
+		m.participants.state = m.state
+		m.participants.entries = m.state.Participants
 		return m, nil
 
 	case backMsg:
@@ -143,7 +146,7 @@ func (m App) handleMenuSelect(key string) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case "bootstrap":
-		if !m.state.EnvConfigured {
+		if !m.state.ConfigConfigured {
 			return m, nil // need setup first
 		}
 		if !m.state.HasOpenSSL {
@@ -152,12 +155,12 @@ func (m App) handleMenuSelect(key string) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg {
 			return startRunnerMsg{
 				title: "Bootstrap Node — Generating Certificates",
-				tasks: bootstrapTasks(m.state),
+				tasks: bootstrapTasks(m.state, BootstrapOptions{}),
 			}
 		}
 
 	case "start":
-		if !m.state.HasDocker || !m.state.EnvConfigured {
+		if !m.state.HasDocker || !m.state.ConfigConfigured {
 			return m, nil
 		}
 		return m, func() tea.Msg {

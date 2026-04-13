@@ -11,24 +11,30 @@
 #   - Docker and Docker Compose installed.
 #
 # Usage:
-#   cd federation/
-#   ./scripts/bootstrap-network.sh
+#   ./bin/odctl network start
 #
-# After this script completes, start the network with:
-#   docker compose -f docker-compose.fabric.yml up -d
+# Direct invocation (advanced):
+#   NETWORK_DIR=./federation/runs/<instance> ./federation/scripts/bootstrap-network.sh
+#
+# Optional overrides: NETWORK_DIR, CONFIG_DIR, CRYPTO_DIR, ARTIFACTS_DIR,
+# COMPOSE_FILE, COMPOSE_PROJECT_NAME, FOUNDING_ORG_MSPS
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FED_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-CONFIG_DIR="$FED_DIR/config"
-CRYPTO_DIR="$FED_DIR/crypto"
-ARTIFACTS_DIR="$FED_DIR/channel-artifacts"
+NETWORK_DIR="${NETWORK_DIR:-$FED_DIR}"
+CONFIG_DIR="${CONFIG_DIR:-$NETWORK_DIR/config}"
+CRYPTO_DIR="${CRYPTO_DIR:-$NETWORK_DIR/crypto}"
+ARTIFACTS_DIR="${ARTIFACTS_DIR:-$NETWORK_DIR/channel-artifacts}"
+COMPOSE_FILE="${COMPOSE_FILE:-$NETWORK_DIR/docker-compose.fabric.yml}"
+COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-}"
 
 # Fabric binary location — override with FABRIC_BIN env var.
 FABRIC_BIN="${FABRIC_BIN:-$(command -v cryptogen >/dev/null 2>&1 && dirname "$(command -v cryptogen)" || echo "")}"
 
 CHANNEL_NAME="${CHANNEL_NAME:-governance}"
+FOUNDING_ORG_MSPS="${FOUNDING_ORG_MSPS:-}"
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -65,6 +71,26 @@ Then either add them to PATH or set FABRIC_BIN=/path/to/fabric-samples/bin"
     fi
 }
 
+check_generated_files() {
+    local missing=()
+    for path in \
+        "$CONFIG_DIR/crypto-config.yaml" \
+        "$CONFIG_DIR/configtx.yaml" \
+        "$COMPOSE_FILE"; do
+        if [ ! -f "$path" ]; then
+            missing+=("$path")
+        fi
+    done
+
+    if [ ${#missing[@]} -gt 0 ]; then
+        fatal "Missing generated founding-network files:
+  ${missing[*]}
+
+Run './bin/odctl network start' to generate an isolated run, or set NETWORK_DIR
+to an existing federation/runs/<instance> directory before invoking this script."
+    fi
+}
+
 fabric_cmd() {
     local cmd="$1"; shift
     if [ -n "$FABRIC_BIN" ]; then
@@ -81,6 +107,7 @@ main() {
     echo ""
 
     check_prereqs
+    check_generated_files
 
     # Clean previous artifacts.
     if [ -d "$CRYPTO_DIR" ]; then
@@ -116,23 +143,35 @@ main() {
         -channelID "$CHANNEL_NAME"
 
     # 4. Generate anchor peer updates for each org.
-    for org in OpenDemocracy ExampleGov; do
+    local founding_orgs=()
+    if [ -n "$FOUNDING_ORG_MSPS" ]; then
+        IFS=',' read -r -a founding_orgs <<< "$FOUNDING_ORG_MSPS"
+    else
+        founding_orgs=(OpenDemocracyMSP ExampleGovMSP)
+    fi
+    for org in "${founding_orgs[@]}"; do
+        [ -z "$org" ] && continue
         info "Generating anchor peer update for $org..."
         fabric_cmd configtxgen \
             -profile GovernanceChannel \
-            -outputAnchorPeersUpdate "$ARTIFACTS_DIR/${org}MSPanchors.tx" \
+            -outputAnchorPeersUpdate "$ARTIFACTS_DIR/${org}anchors.tx" \
             -channelID "$CHANNEL_NAME" \
-            -asOrg "${org}MSP" 2>/dev/null || \
+            -asOrg "$org" 2>/dev/null || \
         warn "Anchor peer update for $org skipped (may require Fabric 2.5+ configtxgen)"
     done
+
+    local compose_cmd="docker compose"
+    if [ -n "$COMPOSE_PROJECT_NAME" ]; then
+        compose_cmd="$compose_cmd -p $COMPOSE_PROJECT_NAME"
+    fi
+    compose_cmd="$compose_cmd -f $COMPOSE_FILE up -d"
 
     echo ""
     info "Network bootstrap complete."
     echo ""
     echo "Next steps:"
     echo "  1. Start the network:"
-    echo "       cd $FED_DIR"
-    echo "       docker compose -f docker-compose.fabric.yml up -d"
+    echo "       $compose_cmd"
     echo ""
     echo "  2. Create the governance channel:"
     echo "       ./scripts/create-channel.sh"
@@ -144,6 +183,8 @@ main() {
     echo "       ./scripts/register-participants.sh"
     echo ""
     echo "Generated artifacts:"
+    echo "  Run dir:  $NETWORK_DIR"
+    echo "  Config:   $CONFIG_DIR"
     echo "  Crypto:   $CRYPTO_DIR"
     echo "  Genesis:  $ARTIFACTS_DIR/genesis.block"
     echo "  Channel:  $ARTIFACTS_DIR/${CHANNEL_NAME}.tx"

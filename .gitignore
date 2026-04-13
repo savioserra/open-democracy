@@ -8,3 +8,11 @@
 *.log
 .idea/
 .vscode/
+
+# Local federation node artifacts.
+federation/.env
+federation/democracy.toml
+federation/connection-profile.yaml
+federation/crypto/
+federation/channel-artifacts/
+federation/fabric-ca-server/

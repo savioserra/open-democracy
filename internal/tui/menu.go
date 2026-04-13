@@ -34,7 +34,7 @@ func newMenu(state ProjectState) menuModel {
 					if !s.HasDocker {
 						return errStyle.Render("docker not found")
 					}
-					if s.RunningCount() > 0 {
+					if s.DemoRunningCount() > 0 {
 						return successStyle.Render("● running")
 					}
 					return dimStyle.Render("ready")
@@ -44,7 +44,10 @@ func newMenu(state ProjectState) menuModel {
 				key: "setup", icon: "⚙", name: "Setup",
 				desc: "Configure your organization identity",
 				statusFn: func(s ProjectState) string {
-					if s.EnvConfigured {
+					if s.ConfigError != "" {
+						return errStyle.Render("invalid config")
+					}
+					if s.ConfigConfigured {
 						return successStyle.Render("✓ " + s.OrgName)
 					}
 					return warnStyle.Render("not configured")
@@ -54,10 +57,13 @@ func newMenu(state ProjectState) menuModel {
 				key: "bootstrap", icon: "🔑", name: "Bootstrap",
 				desc: "Generate certificates and crypto",
 				statusFn: func(s ProjectState) string {
+					if s.ConfigError != "" {
+						return errStyle.Render("fix config")
+					}
 					if s.CryptoGenerated {
 						return successStyle.Render("✓ generated")
 					}
-					if !s.EnvConfigured {
+					if !s.ConfigConfigured {
 						return dimStyle.Render("setup first")
 					}
 					return warnStyle.Render("○ pending")
@@ -70,11 +76,14 @@ func newMenu(state ProjectState) menuModel {
 					if !s.HasDocker {
 						return errStyle.Render("docker not found")
 					}
-					if !s.EnvConfigured {
+					if s.ConfigError != "" {
+						return errStyle.Render("fix config")
+					}
+					if !s.ConfigConfigured {
 						return dimStyle.Render("setup first")
 					}
-					if s.RunningCount() > 0 {
-						return successStyle.Render(fmt.Sprintf("● %d running", s.RunningCount()))
+					if s.NodeRunningCount() > 0 {
+						return successStyle.Render(fmt.Sprintf("● %d running", s.NodeRunningCount()))
 					}
 					return dimStyle.Render("stopped")
 				},

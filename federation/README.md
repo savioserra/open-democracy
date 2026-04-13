@@ -21,50 +21,77 @@ containers** running on a single machine (or spread across a cluster):
 All containers are standard Docker images. A modest server (2 CPU, 4GB RAM)
 is sufficient for a peer with thousands of participants.
 
-## Quick start (5 steps)
+## Quick start (6 steps)
 
 ```bash
 # 1. Clone the repository
 git clone https://github.com/savioserra/open-democracy.git
-cd open-democracy/federation
+cd open-democracy
 
-# 2. Configure your organization
-cp config/org-template.env .env
-# Edit .env — set ORG_NAME, SCOPE_PREFIX, etc.
+# 2. Build odctl
+make odctl
 
-# 3. Bootstrap your node (generates crypto material)
-./scripts/bootstrap-node.sh
+# 3. Configure your organization
+./bin/odctl node setup \
+  --org-name city-porto-alegre \
+  --display-name "City of Porto Alegre" \
+  --scope-prefix GOV:CITY_PORTO_ALEGRE \
+  --domain city-porto-alegre.od.local \
+  --gateway-user savio \
+  --ca-admin-user admin \
+  --ca-admin-pass adminpw
 
-# 4. Start the containers
-docker compose -f docker-compose.node.yml up -d
+# 4. Bootstrap your node (generates crypto material)
+./bin/odctl node bootstrap
 
-# 5. Open the dashboard
+# 5. Start the containers
+./bin/odctl node start
+
+# 6. Inspect status / open the dashboard
+./bin/odctl status
 open http://localhost:8080
 ```
 
 Your node starts in **demo mode** with the in-process governance engine. To
 connect to the live federation, complete the onboarding workflow below.
 
+To launch a founding consortium instead of a joiner node, run
+`./bin/odctl network start`. That command generates an isolated run under
+`federation/runs/<instance>/`, writes the founder `docker-compose.fabric.yml`,
+`configtx.yaml`, and `crypto-config.yaml` for that run, bootstraps the Fabric
+artifacts, and starts Docker Compose with an instance-specific project name.
+Source `federation/runs/<instance>/run.env` before running follow-up scripts
+like `deploy-chaincode.sh` or `add-organization.sh`.
+
 ## Onboarding workflow
 
 ### Phase 1: Prepare your node
 
-1. **Configure `.env`** with your organization identity:
-   ```env
-   ORG_NAME=city-porto-alegre
-   ORG_DISPLAY="City of Porto Alegre"
-   ORG_MSP_ID=CityPortoAlegreMSP
-   ORG_DOMAIN=portoalegre.od.example.com
-   SCOPE_PREFIX=GOV:CITY_PORTO_ALEGRE
-   ```
+1. **Configure `democracy.toml`** with `./bin/odctl node setup` (or the TUI):
+    ```toml
+    [organization]
+    name = "city-porto-alegre"
+    display_name = "City of Porto Alegre"
+    scope_prefix = "GOV:CITY_PORTO_ALEGRE"
+    domain = "city-porto-alegre.od.local"
 
-2. **Run `bootstrap-node.sh`** to generate:
-   - CA certificate and key
-   - Peer TLS certificates
-   - MSP directory structure
-   - Connection profile
+    [ca]
+    admin_user = "admin"
+    admin_pass = "adminpw"
 
-3. **Start your containers** to verify everything works locally.
+    [gateway]
+    port = 8080
+    default_user = "savio"
+    ```
+
+2. **Run `./bin/odctl node bootstrap`** to generate:
+    - CA certificate and key
+    - CA TLS certificate
+    - Organization admin MSP material
+    - Peer MSP and peer TLS certificates
+    - An optional connection profile only when `--persist-connection-profile` is requested
+
+3. **Start your containers** with `./bin/odctl node start` to verify everything works locally.
 
 ### Phase 2: Join the federation
 
@@ -259,13 +286,12 @@ See `docs/DISTRIBUTED_LEDGER_DESIGN.md` for details on each pattern.
 ```
 federation/
 ├── README.md                           ← you are here
-├── docker-compose.fabric.yml           multi-org Fabric network (founders)
+├── democracy.toml                      local odctl source-of-truth config (ignored)
 ├── docker-compose.node.yml             single-org node (new members)
+├── runs/<instance>/                    generated founding-network run
 ├── config/
-│   ├── configtx.yaml                   Fabric channel configuration
-│   ├── crypto-config.yaml              certificate generation template
-│   ├── org-template.env                organization configuration template
-│   └── connection-profile-template.yaml  SDK connection profile
+│   ├── org-template.env                legacy env template for script-based flows
+│   └── connection-profile-template.yaml  legacy SDK connection profile template
 └── scripts/
     ├── bootstrap-network.sh            initialize the founding network
     ├── bootstrap-node.sh               prepare a new org's node

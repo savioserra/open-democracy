@@ -13,7 +13,8 @@ This repository is intended as a clear, extensible base to prototype governance 
 ## Quickstart (dashboard in a container)
 
 ```
-docker compose up --build
+make up
+# or: make odctl && ./bin/odctl demo start
 # then open http://localhost:8080/
 ```
 
@@ -113,7 +114,7 @@ Optional (for the listener):
 │   ├── gateway/
 │   │   └── main.go             # Gateway entrypoint (REST + dashboard, persists to JSON)
 │   └── odctl/
-│       └── main.go             # Federation TUI entrypoint (bubbletea)
+│       └── main.go             # Federation hybrid CLI + TUI entrypoint
 ├── internal/
 │   ├── gateway/
 │   │   ├── server.go           # HTTP server, embedded templates, middleware
@@ -135,13 +136,13 @@ Optional (for the listener):
 ├── docs/
 │   └── DISTRIBUTED_LEDGER_DESIGN.md  # Federation architecture + cross-chain patterns
 ├── federation/                 # Multi-org Fabric network setup (see federation/README.md)
-│   ├── docker-compose.fabric.yml     # Founding consortium network
+│   ├── runs/<instance>/              # Generated founding-network runs
 │   ├── docker-compose.node.yml       # Single-org node for new members
 │   ├── config/                       # Channel config, crypto, connection templates
 │   └── scripts/                      # Bootstrap, onboarding, deployment automation
 ├── Dockerfile                  # Multi-stage static-binary build
 ├── docker-compose.yml          # Single-service stack with persistent volume
-├── Makefile                    # test / build / odctl / run / image / up / down / logs
+├── Makefile                    # test / build / odctl / run / up / down / status / node-* / network-* helpers
 ├── go.mod
 └── README.md
 ```
@@ -332,15 +333,15 @@ When a Fabric CA is available, set these to issue real X.509 certificates:
 # Health
 curl localhost:8080/api/health
 
-# Create a bill as Ada (Division 1 proposer)
+# Create a bill as Alice (core proposer)
 curl -X POST localhost:8080/api/bills \
-  -H 'X-User: ada' -H 'Content-Type: application/json' \
-  -d '{"id":"BILL-123","ipfsHash":"QmHash","description":"…","quorum":"0.5","scope":"ES:TEACHER_UNION:DIVISION_1:*","executeMask":"YES","rejectMask":"NO"}'
+  -H 'X-User: alice' -H 'Content-Type: application/json' \
+  -d '{"id":"BILL-123","ipfsHash":"QmHash","description":"…","quorum":"0.5","scope":"OPENDEMOCRACY:CORE:*","executeMask":"YES","rejectMask":"NO"}'
 
-# Assign a voter as Felipe (Division 1 admin)
+# Assign a voter as Savio (project admin)
 curl -X POST localhost:8080/api/bills/BILL-123/roles \
-  -H 'X-User: felipe' -H 'Content-Type: application/json' \
-  -d '{"userId":"carla","role":"VOTER"}'
+  -H 'X-User: savio' -H 'Content-Type: application/json' \
+  -d '{"userId":"eve","role":"VOTER"}'
 
 # Register a participant (requires ADMIN over the granted scopes)
 curl -X POST localhost:8080/api/participants \
@@ -354,25 +355,49 @@ curl -X DELETE localhost:8080/api/participants/carlos -H 'X-User: savio'
 curl -N localhost:8080/api/events/stream
 ```
 
-## Federation TUI (`odctl`)
+## Federation CLI + TUI (`odctl`)
 
-`cmd/odctl` is a terminal UI that replaces manual script execution with a
-guided workflow for bootstrapping and managing federation nodes. Built with
-[bubbletea](https://github.com/charmbracelet/bubbletea), it runs over SSH
-on a VPS.
+`cmd/odctl` is now a hybrid interface: no arguments launch the Bubble Tea TUI,
+while explicit subcommands provide scriptable entrypoints that the Makefile and
+docs can use directly.
 
 ```
-make odctl && ./bin/odctl
+make odctl
+./bin/odctl                 # interactive TUI
+./bin/odctl status          # show demo + node status
+./bin/odctl demo start      # start the root demo dashboard stack
+./bin/odctl node start      # start the federation node stack
 ```
 
-Screens:
-- **Quick Start** — one-key demo launch via `docker compose up`
-- **Setup** — configure organization identity, writes `federation/.env`
-- **Bootstrap** — generate CA and peer TLS certificates via openssl
+Interactive screens:
+- **Quick Start** — one-key demo launch via `odctl demo start`
+- **Setup** — configure organization identity, runtime domain, and CA/gateway credentials in `federation/democracy.toml`
+- **Bootstrap** — generate the CA, admin MSP, peer MSP, and peer TLS material via openssl
 - **Start/Stop** — manage federation Docker containers
 - **Participants** — register users with scope claims (persists to CSV)
 
-The TUI auto-detects project state and shows status indicators for each step.
+Scriptable commands:
+- `odctl demo start|stop`
+- `odctl node setup|bootstrap|start|stop`
+- `odctl network start|stop`
+- `odctl status`
+
+`federation/democracy.toml` is the source of truth for both the single-node
+workflow and the founding-network topology. Legacy `.env` files and
+`connection-profile.yaml` are only exported when explicitly requested with CLI
+flags such as `odctl node setup --persist-env` or
+`odctl node bootstrap --persist-connection-profile`.
+
+When `odctl` starts the node stack it injects the live runtime values from
+`democracy.toml`; the `.example.com` literals left in compose/templates are
+fallback examples for legacy manual flows, not the active node domain.
+
+When `odctl network start` brings up a founding consortium, it generates an
+isolated run under `federation/runs/<instance>/` containing that run's
+`docker-compose.fabric.yml`, `configtx.yaml`, and `crypto-config.yaml`, then
+bootstraps and starts Docker Compose with an instance-specific project name.
+
+The TUI auto-detects project state and the CLI reuses the same workflow logic.
 
 ## Federation
 
@@ -383,10 +408,10 @@ unions, and companies. See `docs/DISTRIBUTED_LEDGER_DESIGN.md` for the
 architectural vision, gap analysis, and cross-chain communication patterns.
 
 Key files:
-- `federation/docker-compose.fabric.yml` — multi-org Fabric network (founders)
+- `federation/runs/<instance>/docker-compose.fabric.yml` — generated multi-org Fabric network
 - `federation/docker-compose.node.yml` — single-org node (new members)
 - `federation/scripts/` — bootstrap, onboarding, and deployment automation
-- `federation/config/` — Fabric channel config, crypto, and connection templates
+- `federation/config/` — node connection templates
 
 ## Off‑chain Listener (real Fabric only)
 
@@ -396,7 +421,7 @@ the upstream `fabric-sdk-go` is end-of-life and incompatible with the
 scenario the gateway's broadcaster (`/api/events/stream`) supersedes it.
 
 Environment variables:
-- FABRIC_SDK_CONFIG: path to the connection profile YAML
+- FABRIC_SDK_CONFIG: path to the connection profile YAML (export one with `odctl node bootstrap --persist-connection-profile` when needed)
 - FABRIC_CHANNEL: channel (e.g., mychannel)
 - FABRIC_ORG: organization (e.g., Org1)
 - FABRIC_USER: SDK user (e.g., User1)

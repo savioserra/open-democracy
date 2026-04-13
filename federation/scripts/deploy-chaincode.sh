@@ -7,11 +7,12 @@
 # ensuring no single org can unilaterally update the ledger.
 #
 # Prerequisites:
-#   - Network running (docker-compose.fabric.yml or equivalent)
+#   - Network running from a generated founding-network run
 #   - Peers joined to the channel
 #   - peer CLI with correct environment variables
 #
 # Usage:
+#   source federation/runs/<instance>/run.env
 #   ./scripts/deploy-chaincode.sh [--channel governance] [--version 1.0] [--sequence 1]
 
 set -euo pipefail
@@ -19,6 +20,9 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FED_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 REPO_ROOT="$(cd "$FED_DIR/.." && pwd)"
+NETWORK_DIR="${NETWORK_DIR:-$FED_DIR}"
+CRYPTO_DIR="${CRYPTO_DIR:-$NETWORK_DIR/crypto}"
+ARTIFACTS_DIR="${ARTIFACTS_DIR:-$NETWORK_DIR/channel-artifacts}"
 
 # ── Defaults ─────────────────────────────────────────────────────────────
 
@@ -30,7 +34,7 @@ CC_SRC_PATH="$REPO_ROOT/chaincode/bill"
 CC_LABEL="${CC_NAME}_${CC_VERSION}"
 
 ORDERER_ADDR="${ORDERER_ADDR:-orderer1.od.example.com:7050}"
-ORDERER_CA="$FED_DIR/crypto/ordererOrganizations/od.example.com/msp/tlscacerts/tlsca.od.example.com-cert.pem"
+ORDERER_CA="${ORDERER_CA:-$CRYPTO_DIR/ordererOrganizations/od.example.com/msp/tlscacerts/tlsca.od.example.com-cert.pem}"
 
 # ── Parse arguments ──────────────────────────────────────────────────────
 
@@ -48,6 +52,16 @@ done
 info()  { echo "==> $*"; }
 fatal() { echo "FATAL: $*" >&2; exit 1; }
 
+require_generated_run() {
+    if [ ! -f "$ORDERER_CA" ]; then
+        fatal "Missing orderer TLS CA at $ORDERER_CA
+
+Source federation/runs/<instance>/run.env or set NETWORK_DIR/CRYPTO_DIR/ORDERER_CA
+to an active generated founding-network run before using this script."
+    fi
+    mkdir -p "$ARTIFACTS_DIR"
+}
+
 WORK_DIR=$(mktemp -d)
 trap "rm -rf $WORK_DIR" EXIT
 
@@ -55,6 +69,8 @@ trap "rm -rf $WORK_DIR" EXIT
 
 info "Deploying chaincode '$CC_NAME' v$CC_VERSION (seq $CC_SEQUENCE) to channel '$CHANNEL_NAME'"
 echo ""
+
+require_generated_run
 
 # Step 1: Package the chaincode.
 info "Step 1/4: Packaging chaincode..."
@@ -135,5 +151,5 @@ echo "  peer lifecycle chaincode querycommitted --channelID $CHANNEL_NAME --name
 echo ""
 
 # Save the package for distribution to other orgs.
-cp "$WORK_DIR/${CC_LABEL}.tar.gz" "$FED_DIR/channel-artifacts/${CC_LABEL}.tar.gz" 2>/dev/null || true
-info "Chaincode package saved to: $FED_DIR/channel-artifacts/${CC_LABEL}.tar.gz"
+cp "$WORK_DIR/${CC_LABEL}.tar.gz" "$ARTIFACTS_DIR/${CC_LABEL}.tar.gz" 2>/dev/null || true
+info "Chaincode package saved to: $ARTIFACTS_DIR/${CC_LABEL}.tar.gz"

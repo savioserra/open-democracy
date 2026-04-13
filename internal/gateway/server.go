@@ -79,6 +79,9 @@ func NewServer(cfg Config) (*Server, error) {
 	if err := Seed(reg, svc); err != nil {
 		return nil, fmt.Errorf("seed: %w", err)
 	}
+	if err := s.validateDefaultUser(); err != nil {
+		return nil, err
+	}
 	tmpls, err := parseTemplates()
 	if err != nil {
 		return nil, fmt.Errorf("parse templates: %w", err)
@@ -181,6 +184,17 @@ func (s *Server) loadPersistedParticipants() {
 	}
 }
 
+func (s *Server) validateDefaultUser() error {
+	id := strings.TrimSpace(s.cfg.DefaultUser)
+	if id == "" {
+		return nil
+	}
+	if _, err := s.registry.Get(id); err != nil {
+		return fmt.Errorf("default user %q is not registered: %w", id, err)
+	}
+	return nil
+}
+
 // electorateForScope counts how many registered participants have scope
 // claims covering the given scope. This is the denominator for quorum and
 // the source of ABSENCE at vote close time.
@@ -276,15 +290,15 @@ func (l *loggingResponseWriter) Flush() {
 // idiomatic Go html/template way to do "extends layout".
 func parseTemplates() (map[string]*template.Template, error) {
 	funcs := template.FuncMap{
-		"formatTime": formatTime,
-		"choiceName": choiceName,
-		"roleNames":  roleNames,
+		"formatTime":   formatTime,
+		"choiceName":   choiceName,
+		"roleNames":    roleNames,
 		"isCollecting": func(s string) bool { return s == bill.StatusCollecting },
 		"isExecuted":   func(s string) bool { return s == bill.StatusExecuted },
 		"isRejected":   func(s string) bool { return s == bill.StatusRejected },
 		"isVoting":     func(s string) bool { return s == bill.StatusVoting },
 		"isDraft":      func(s string) bool { return s == bill.StatusDraft },
-		"slice": func(items ...string) []string { return items },
+		"slice":        func(items ...string) []string { return items },
 	}
 	pages := []string{"index.html", "bill.html", "delegations.html", "petitions.html", "participants.html", "entities.html", "events.html"}
 	out := make(map[string]*template.Template, len(pages))

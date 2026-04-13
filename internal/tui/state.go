@@ -3,27 +3,32 @@ package tui
 import (
 	"bufio"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 )
 
 // ProjectState holds detected state of the project for the TUI.
 type ProjectState struct {
-	RepoRoot        string
-	FedDir          string
-	EnvConfigured   bool
-	CryptoGenerated bool
-	HasDocker       bool
-	HasOpenSSL      bool
-	OrgName         string
-	OrgDisplay      string
-	ScopePrefix     string
-	GatewayPort     string
-	MspID           string
-	Domain          string
-	Containers      []Container
-	Participants    []ParticipantEntry
+	RepoRoot         string
+	FedDir           string
+	ConfigConfigured bool
+	ConfigPath       string
+	ConfigSource     string
+	ConfigError      string
+	Config           NodeConfig
+	CryptoGenerated  bool
+	HasDocker        bool
+	HasOpenSSL       bool
+	OrgName          string
+	OrgDisplay       string
+	ScopePrefix      string
+	GatewayPort      string
+	MspID            string
+	Domain           string
+	Containers       []Container
+	DemoContainers   []Container
+	NodeContainers   []Container
+	Participants     []ParticipantEntry
 }
 
 // Container represents a Docker container.
@@ -48,43 +53,58 @@ func DetectState() ProjectState {
 	st := ProjectState{
 		RepoRoot:    root,
 		FedDir:      fedDir,
-		GatewayPort: "8080",
+		ConfigPath:  filepath.Join(fedDir, nodeConfigFileName),
+		GatewayPort: defaultGatewayPort,
 		HasDocker:   commandExists("docker"),
 		HasOpenSSL:  commandExists("openssl"),
 	}
 
-	envPath := filepath.Join(fedDir, ".env")
-	if env, err := readEnv(envPath); err == nil && env["ORG_NAME"] != "" {
-		st.EnvConfigured = true
-		st.OrgName = env["ORG_NAME"]
-		st.OrgDisplay = env["ORG_DISPLAY"]
-		st.ScopePrefix = env["SCOPE_PREFIX"]
-		if p := env["GATEWAY_PORT"]; p != "" {
-			st.GatewayPort = p
-		}
-		st.MspID = env["ORG_MSP_ID"]
-		st.Domain = env["ORG_DOMAIN"]
+	cfg, path, source, err := loadNodeConfig(fedDir)
+	if err != nil {
+		st.ConfigPath = path
+		st.ConfigSource = source
+		st.ConfigError = err.Error()
+	} else if source != "" {
+		st.ConfigConfigured = true
+		st.ConfigPath = path
+		st.ConfigSource = source
+		st.Config = cfg
+		st.OrgName = strings.TrimSpace(cfg.Organization.Name)
+		st.OrgDisplay = strings.TrimSpace(cfg.Organization.DisplayName)
+		st.ScopePrefix = strings.TrimSpace(cfg.Organization.ScopePrefix)
+		st.GatewayPort = cfg.GatewayPort()
+		st.MspID = cfg.MSPID()
+		st.Domain = cfg.Domain()
 	}
 
 	if _, err := os.Stat(filepath.Join(fedDir, "crypto", "ca", "ca-cert.pem")); err == nil {
 		st.CryptoGenerated = true
 	}
 
-	st.Containers = detectContainers(root)
+	st.DemoContainers = detectComposeContainers(root, nil)
+	var nodeEnv map[string]string
+	if st.ConfigConfigured {
+		nodeEnv = st.Config.ComposeEnv()
+	}
+	st.NodeContainers = detectComposeContainers(fedDir, nodeEnv, "-f", "docker-compose.node.yml")
+	st.Containers = append(append([]Container{}, st.DemoContainers...), st.NodeContainers...)
 	st.Participants = readParticipantsCSV(filepath.Join(fedDir, "participants.csv"))
 	return st
 }
 
 // RunningCount returns the number of running containers.
 func (s ProjectState) RunningCount() int {
-	n := 0
-	for _, c := range s.Containers {
-		low := strings.ToLower(c.State)
-		if strings.Contains(low, "running") || strings.Contains(low, "up") {
-			n++
-		}
-	}
-	return n
+	return runningCount(s.Containers)
+}
+
+// DemoRunningCount returns the number of running demo stack containers.
+func (s ProjectState) DemoRunningCount() int {
+	return runningCount(s.DemoContainers)
+}
+
+// NodeRunningCount returns the number of running federation node containers.
+func (s ProjectState) NodeRunningCount() int {
+	return runningCount(s.NodeContainers)
 }
 
 // --- helpers ----------------------------------------------------------------
@@ -103,11 +123,6 @@ func findRepoRoot() string {
 	}
 	wd, _ := os.Getwd()
 	return wd
-}
-
-func commandExists(name string) bool {
-	_, err := exec.LookPath(name)
-	return err == nil
 }
 
 func readEnv(path string) (map[string]string, error) {
@@ -135,41 +150,22 @@ func readEnv(path string) (map[string]string, error) {
 	return env, sc.Err()
 }
 
-func writeEnv(path string, vals map[string]string) error {
-	// Try to read existing template to preserve comments.
-	tmplPath := filepath.Join(filepath.Dir(path), "config", "org-template.env")
-	tmpl, err := os.ReadFile(tmplPath)
-	if err != nil {
-		// No template — write minimal file.
-		var sb strings.Builder
-		for k, v := range vals {
-			sb.WriteString(k + "=" + v + "\n")
-		}
-		return os.WriteFile(path, []byte(sb.String()), 0644)
-	}
-
-	lines := strings.Split(string(tmpl), "\n")
-	for i, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" || trimmed[0] == '#' {
-			continue
-		}
-		k, _, ok := strings.Cut(trimmed, "=")
-		if !ok {
-			continue
-		}
-		k = strings.TrimSpace(k)
-		if v, found := vals[k]; found {
-			lines[i] = k + "=" + v
+func runningCount(containers []Container) int {
+	n := 0
+	for _, c := range containers {
+		low := strings.ToLower(c.State)
+		if strings.Contains(low, "running") || strings.Contains(low, "up") {
+			n++
 		}
 	}
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0644)
+	return n
 }
 
-func detectContainers(repoRoot string) []Container {
-	cmd := exec.Command("docker", "compose", "ps", "--format", "{{.Name}}\t{{.State}}\t{{.Ports}}")
-	cmd.Dir = repoRoot
-	out, err := cmd.Output()
+func detectComposeContainers(dir string, env map[string]string, composeArgs ...string) []Container {
+	args := []string{"compose"}
+	args = append(args, composeArgs...)
+	args = append(args, "ps", "--format", "{{.Name}}\t{{.State}}\t{{.Ports}}")
+	out, err := commandOutputWithEnv(dir, env, "docker", args...)
 	if err != nil {
 		return nil
 	}
